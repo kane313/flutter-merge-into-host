@@ -495,6 +495,87 @@ fi
 
 All applicable checks must pass.
 
+## Rule 9: Base button label overflow guard (preemptive fix)
+
+**When this rule fires**: source has its own base button widget (typically `AppButton` / `AppCircleIconButton` / `CommonButton` — anything wrapping `onPressed`/`onTap` plus a label) AND the page composes buttons via a `Row` + Expanded/flex pattern (e.g. `AppButtonRow(secondary, primary)` with a 1:2.6 ratio). Default to running this rule when Rule 2 (DebounceUtil) targets the same widget — they patch the same files.
+
+**Why this is not optional**: source's label is typically `Row(mainAxisSize: min, [Text, gap, Icon])`. Works in source's standalone runtime because there source has its own fonts (PingFang SC on iOS, designer's spacing). After merge into a host that ships under different fonts (Android with Noto Sans CJK fallback), Chinese glyphs are 3–5% wider; in a narrow flex slot (≤ ~50w container, common when secondary button gets ~30% of a 350w row), the content widens past the container by 5–15 px. **Runtime crash-free but visible "overflowed by N pixels" yellow-black stripe**; analyzer can't catch this — only device run does.
+
+`MainAxisSize.min` doesn't help: each child's intrinsic width is fixed (Text width = fontSize × glyph count + kerning; Icon width = size). Row can't shrink below sum of children.
+
+### The fix
+
+Wrap the label `Row` in `FittedBox(fit: BoxFit.scaleDown)` and harden the Text:
+
+```dart
+// Before
+final Widget label = Row(
+  mainAxisSize: MainAxisSize.min,
+  children: [
+    Text(widget.label, style: ...),
+    if (widget.icon != null) ...[
+      SizedBox(width: AppSpacing.xs),
+      AppIcon(icon: widget.icon!, size: _iconSize, color: ...),
+    ],
+  ],
+);
+
+// After
+final Widget label = FittedBox(
+  fit: BoxFit.scaleDown,
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        widget.label,
+        maxLines: 1,
+        softWrap: false,
+        style: ...,
+      ),
+      if (widget.icon != null) ...[
+        SizedBox(width: AppSpacing.xs),
+        AppIcon(icon: widget.icon!, size: _iconSize, color: ...),
+      ],
+    ],
+  ),
+);
+```
+
+**Why `scaleDown` not `scale`**: `scaleDown` only shrinks when content exceeds the container; on normal-width buttons it's a no-op. `BoxFit.scale` would also enlarge content on wide buttons, ruining typography.
+
+**Why also `maxLines: 1, softWrap: false`**: belt-and-suspenders. If a future change uses `FittedBox(fit: contain)` instead of `scaleDown`, the Text-only safety net still prevents soft-wrap inside a 1-line button.
+
+### Step 1: locate source's base button widget(s)
+
+Same as Rule 2 — the file already has DebounceUtil wired in by Rule 2:
+
+```bash
+grep -rlE "class App(Button|CircleIconButton|TextButton)" lib/features/<src-name>/widgets/
+```
+
+Apply the FittedBox+Text guard to the `label` (or equivalent body) widget of each.
+
+### Step 2: do NOT wrap inline Text in arbitrary GestureDetectors
+
+This rule only applies to **base button widgets** the source maintains. Don't blanket-wrap every Text in the grafted code — invasive and unnecessary.
+
+### Step 3: Verification (added to Phase 4 scorecard)
+
+```bash
+# Each grafted base button widget contains FittedBox.scaleDown around its label
+for f in $(grep -rlE "class App(Button|CircleIconButton)" lib/features/<src-name>/widgets/); do
+  grep -E "FittedBox\(\s*fit:\s*BoxFit\.scaleDown" "$f" > /dev/null || echo "MISSING_GUARD: $f"
+done
+```
+
+Empty output required.
+
+### Skip conditions
+
+- Source's button is icon-only with no Text label → Row content is just an Icon → fixed width with no font fallback issue → no guard needed.
+- Source's button uses `Expanded(child: Text)` inside its own internal Row → already handles narrow case correctly → no need to add FittedBox (would scale-down even when ellipsis is more appropriate). Leave alone.
+- Source's button is composed into a parent that ALWAYS gives it `width: double.infinity` (full-width buttons only, never narrow) → font drift produces equal-distribution Text width, no overflow → guard is harmless but unnecessary; record skip reason.
+
 ## Rule 8: Widget file split when files exceed readability thresholds
 
 **When this rule fires**: scan every grafted `.dart` file under `lib/features/<src-name>/`. Any file that trips ANY of these thresholds must be split:

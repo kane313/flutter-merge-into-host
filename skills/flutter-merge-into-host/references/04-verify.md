@@ -94,6 +94,44 @@ Run mechanical checks that catch the silent failures (asset 404, route 404 at ru
 - Any of checks 2/3/4/5/6 emits non-empty output → DO NOT report success; fix the issue first
 - Structural conflict count > 3 → recommend a Stage 2 follow-up task (manual UI integration); do not block but call out clearly
 
+## Runtime overflow detection (manual smoke step)
+
+Static analysis cannot detect `RenderFlex overflowed by N pixels` — it's a layout-time exception emitted only when the offending widget paints. The verify report MUST include a manual smoke-test instruction calling this out explicitly, otherwise users mark "0 error, merge complete" and ship with visible yellow/black overflow stripes.
+
+### Smoke command
+
+```bash
+# After Phase 3 finishes
+flutter run -d <device>            # device list: flutter devices
+# Or for hot-test on simulator:
+flutter run -d "iPhone 15"
+```
+
+Once running, navigate to each grafted route (see "Manual smoke-test checklist" below). Watch the `flutter run` console — any overflow surfaces as:
+
+```
+══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞════════════════════════════════════
+The following assertion was thrown during layout:
+A RenderFlex overflowed by N pixels on the (top|bottom|left|right).
+
+The relevant error-causing widget was:
+  (Row|Column) ... :file:///.../<file>:<line>:<col>
+The overflowing RenderFlex has an orientation of Axis.(horizontal|vertical).
+```
+
+### Common root causes (mapped to Phase 3 rules)
+
+| Overflow symptom | Likely root cause | Fix |
+|---|---|---|
+| Row "overflowed by 5-15 px on right" inside narrow flex button (`AppButtonRow` secondary) | Base button's label Row has no FittedBox guard; cross-font drift | Rule 9 (apply FittedBox.scaleDown to base button label) |
+| Column "overflowed by <1 px on bottom" inside fixed-height SizedBox in grid item | screenutil multi-axis (.r / .h / .sp) drift + font strut on baseline non-matching devices | Use `MainAxisSize.min` on inner Column + remove fixed height SizedBox; let parent Row align by max child height |
+| Row "overflowed by 50+ px" in card with long title | Text not wrapped; no `Flexible` / `Expanded` / `overflow: ellipsis` | Wrap Text in `Flexible/Expanded` with `overflow: TextOverflow.ellipsis, maxLines: 1` |
+| "BoxConstraints forces an infinite width/height" | unbounded ListView/Column inside another unbounded ListView/Column | Wrap with `Expanded` if inside Row/Column, or use `shrinkWrap: true` (only if list count is small) |
+
+### Per-route smoke checklist for verify report
+
+The report's manual checklist enumerates every grafted route with a checkbox. User checks each off as they verify "no overflow stripe + content visible". If any route reports overflow, the offending file:line is captured in the next-action list and Phase 3 re-runs only that file's rule(s).
+
 ## Hot-restart gotcha (always include in verify report)
 
 Flutter's asset manifest is re-read only on **hot restart** (capital `R` in `flutter run`), not hot reload (lowercase `r`). After Phase 2/3, the user MUST hot-restart for new asset paths to resolve. Verify report's manual checklist starts with: "1. Press R (capital) in the terminal running flutter — not r."

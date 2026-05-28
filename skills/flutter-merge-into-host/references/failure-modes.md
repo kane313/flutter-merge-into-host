@@ -117,6 +117,16 @@ AI scans this at the start of every phase to avoid repeating known mistakes.
 
 - ✗ Forgetting to remove the source splash route constant from `<src-name>_routes.dart` after dropping the widget. Compile errors point to the dangling import; user thinks the merge failed. **正解**: delete the GoRoute entry + the route constant line + the widget file together as one atomic edit.
 
+## Phase 3 (Adapt) — Base button label overflow
+
+- ✗ Trusting source's base button (`AppButton`, `CommonButton`, etc.) to handle narrow containers correctly post-merge. Source ships under specific fonts (PingFang SC on iOS); after merge into host on a different platform (Android with Noto Sans CJK fallback), Chinese glyphs are 3–5% wider. In a narrow flex slot (e.g. `AppButtonRow(secondary, primary)` with 1:2.6 ratio gives secondary ~30% of available width), content overflows the container by 5–15 px. **正解**: Rule 9 applies a one-time fix to source's base button widget — wrap the label Row in `FittedBox(fit: BoxFit.scaleDown)` + Text adds `maxLines: 1, softWrap: false`. Visible as "RenderFlex overflowed by N pixels on the right" yellow/black stripe.
+
+- ✗ Trying to fix narrow-button overflow with `MainAxisSize.min` on the inner Row. Doesn't help: each child's intrinsic width is fixed (Text = fontSize × glyph count + kerning; Icon = explicit size). Row can't shrink below the sum of children. **正解**: `FittedBox.scaleDown` shrinks the Row's render scale when overflow detected; no-op when content fits. Use `BoxFit.scaleDown` specifically (NOT `BoxFit.contain`, which would also enlarge on wide buttons).
+
+- ✗ Wrapping every Text in the grafted code with FittedBox preemptively. Invasive; ruins typography on most sites where buttons are wide enough. **正解**: Rule 9 is scoped to source's BASE button widget only (the one source itself uses everywhere). Inline Texts in feature widgets stay alone unless the user reports a specific overflow.
+
+- ✗ Reporting "static analysis 0 error, merge complete" without device-run verification. RenderFlex overflow has no compile signal; emits `FlutterError` at runtime only when the offending widget paints. **正解**: Phase 4 verify report's manual smoke-test checklist explicitly calls out "open each grafted route on at least one device, watch console for 'RenderFlex overflowed'". The check is informational (user must run the app), but the report makes it impossible to skip.
+
 ## Phase 3 (Adapt) — Widget file split
 
 - ✗ Reading source's mega-file (1000+ LOC, 15+ private widgets) as "complex but functional, leave alone". Reviewing or surgically editing is hostile when each file has a dozen widgets fighting for attention; future Claude edits in that file have high miss-rate. **正解**: Rule 8 scan automates the threshold check (LOC > 300 / > 5 private widgets / > 10 const tokens) and splits by region groups, not one-widget-per-file.
