@@ -78,6 +78,13 @@ Build a structured inventory of the source Flutter project + a conflict matrix a
    grep -nE "buildBasePageRoutes|splashLogoAsset|SplashViewModel|BasePageRouteConstant\.splash" HOST/lib/main.dart 2>/dev/null
    # Pattern 3: host has an integration guide mentioning splash
    grep -nE "开屏页|splash" HOST/packages/INTEGRATION_GUIDE.md HOST/CLAUDE.md 2>/dev/null | head -5
+   # Pattern 4: host's splash widget capability level (L0 / L1 / L2 — see 03-adapt.md Rule 7 Step 1)
+   # L2: factory exposes widget injection (preferred)
+   grep -nE "(splashBackground|splashContent|customSplash|splashBuilder)\s*[,)]" \
+     HOST/packages/*/lib/src/router/*.dart HOST/lib/router*.dart 2>/dev/null
+   # L1: SplashPage class has widget param but factory doesn't pass it through
+   grep -rnE "Widget\? (backgroundChild|splashBackground|customSplash)" \
+     HOST/packages/*/lib/src/ui/pages/splash*.dart 2>/dev/null
    ```
 
 4. **Collision detection against host** (5 categories)
@@ -165,17 +172,25 @@ See `templates/discovery.md.tmpl`. Key sections the user reviews:
     - File(s): <path(s)>
     - Logo asset(s): <path(s)>
     - Router entry path: <e.g. /splash, /, /cute_animal/splash>
-    - Initialization side-effects: <list any device-register / API-prefetch / animation / timer logic — affects Phase 3 strategy>
+    - Visual kind: <static-logo / single-image-with-fade / frame-animation / video / lottie>
+    - Frame count (if animation): <N>
+    - Side-effects: <list each business call (await xxxRepo, GetIt, registerDevice, ...) or "none">
   - Host central splash module detected: <yes/no>
     - Module package: <e.g. module_base_page>
-    - Route registration factory: <e.g. buildBasePageRoutes(splashLogoAsset: ...)>
+    - Route registration factory: <e.g. buildBasePageRoutes(splashLogoAsset:)>
     - Route constant: <e.g. BasePageRouteConstant.splash>
     - ViewModel: <e.g. SplashViewModel from get_it>
     - Integration guide reference: <path/section>
-  - Recommended Phase 3 action: <one of below>
-    - replace-with-host: source splash is logo-only → drop source splash widget + route; pass source logo asset to host's splashLogoAsset factory parameter
-    - extend-host: source splash has bespoke business init → keep host's splash flow as entry; port source's init side-effects as a step in host's SplashViewModel chain (or as a post-`initServiceCenter` hook)
+    - Widget-injection capability level: <L0 / L1 / L2>
+      - L0: only splashLogoAsset; no widget param anywhere
+      - L1: SplashPage has Widget? backgroundChild (or similar) but factory doesn't pass-through
+      - L2: factory exposes Widget? splashBackground (or splashBuilder) → ready for Path B
+  - Recommended Phase 3 path: <one of below>
+    - A (logo-replacement): source visual is single-logo + timer; use splashLogoAsset
+    - B (inject-as-background): source has animation/video; extract content widget, use splashBackground
+    - C (extend-host-init): source has bespoke business init; distribute to host's init chain
+    - extend-host-first: host is L0 and source needs Path B → Phase 3 Step 6 (add splashBackground param + update integration guide), then Path B
     - keep-source: host has no central splash module → leave source splash intact at its prefixed route
   ```
 
-  Phase 3 Rule 7 consumes this plan directly.
+  Phase 3 Rule 7 consumes this plan directly. Default precedence: prefer B over A when source has any non-logo visual (animation/video) — collapsing a frame animation to a single image is a designer-unintended visual regression.

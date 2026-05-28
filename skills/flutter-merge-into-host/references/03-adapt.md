@@ -330,84 +330,170 @@ If skipped, record reason in verify-report under "Rule 6 skipped pages".
 - Host has no central splash module (Phase 0 item `k` empty) → leave source splash at its prefixed route, no transform.
 - Source splash is the ONLY route shown to first-time users for a non-launch reason (e.g. it's actually an onboarding page mislabeled "splash") → keep as feature page, not a true launch splash.
 
-### Step 1: Locate host's splash integration point
+### Step 1: Locate host's splash integration point AND widget injection capability
 
-Phase 0 item `k` recorded these. Examples of host shapes seen in the wild:
+Phase 0 item `k` recorded the host's splash entry. **Critical sub-question**: does the host's splash widget expose a *widget injection slot* for fully custom UI (animation / video / 帧序列), or does it only accept a single logo asset?
 
-```dart
-// Shape A: factory function that registers the splash route + accepts logo override
-buildBasePageRoutes(splashLogoAsset: 'assets/images/base/ic_splash.webp')
-
-// Shape B: explicit GoRoute with a host SplashPage class + injected ViewModel
-GoRoute(path: BasePageRouteConstant.splash, builder: (_, __) => const SplashPage())
-
-// Shape C: ServiceCenterConfig builder chain
-ServiceCenterConfig.builder()
-  .setLogoIcon('assets/images/base/ic_launcher.webp')
-  .setSplashAdBottomSloganAsset('assets/images/base/ic_splash_slogan_bottom.webp')
-  // ...
-```
-
-Read host's integration guide (Phase 0 grepped its path) to find the exact API; the guide is the source of truth for parameter names and call sites.
-
-### Step 2: Classify source splash by side-effects
+Grep host's splash class:
 
 ```bash
-# Inspect source splash for initialization beyond visual logo display
+# Find splash class file from item `k`
+SPLASH_FILE=<from-item-k>
+
+# Look for widget injection parameters
+grep -nE "Widget\? (backgroundChild|splashBackground|customSplash|splashContent|splashBuilder)" "$SPLASH_FILE"
+grep -nE "WidgetBuilder\? splashBuilder" "$SPLASH_FILE"
+
+# Verify the factory exposes it (sometimes the SplashPage has the param but the factory doesn't pass-through)
+grep -nE "splashBackground|backgroundChild|customSplash|splashBuilder" <host-splash-route-factory-file>
+```
+
+Three host capability levels:
+
+| Level | What's exposed | Strategy enabler |
+|---|---|---|
+| **L0** — logo only | `splashLogoAsset: String?` (or `setLogoIcon(...)`); no widget param | Path A (logo replacement) only |
+| **L1** — widget injection exists in SplashPage but not exposed in route factory | `SplashPage` has `backgroundChild: Widget?` etc., but `buildBasePageRoutes()` doesn't pass it through | Phase 3 Step 2.5: add the pass-through (one-line factory change); now treat as L2 |
+| **L2** — widget injection fully exposed | Factory has `splashBackground: Widget?` or `splashBuilder: WidgetBuilder` | Path B (inject-as-background) available |
+
+If host is L0 and source has more than a single-image visual (animation/video), **Phase 3 must extend the host first** (see Step 6 below). Document this in plan.md; it's a host-side change that the merge skill is allowed to make because it's strictly additive (existing callers using `splashLogoAsset` keep working).
+
+Also read host's integration guide (Phase 0 grepped its path) to confirm the documented API; the guide is the source of truth.
+
+### Step 2: Classify source splash by visual + side-effects
+
+```bash
 grep -nE "await |\.then\(|Future\.|Timer|Provider\.of|GetIt|init\(|register|fetch|load" \
   <source-splash-file>
 ```
 
-| Classification | Signal | Phase 3 strategy |
+| Classification | Signal | Phase 3 path |
 |---|---|---|
-| **Logo-only** | Body is `Stack/Image.asset` + a `Timer(Duration, () => context.go('/'))` and nothing else | replace-with-host: drop source splash widget + route; pass source's logo asset to host's `splashLogoAsset` parameter |
-| **Logo + simple delay/animation** | Same as above plus animation controllers | replace-with-host with custom logo (host's splash already supports a fade-in; animation usually accepted as visual; if special, surface in verify-report for follow-up) |
-| **Bespoke init logic** | Calls Repository / fetch / GetIt / device register / sets shared state | extend-host: keep host splash as entry; port source's init calls into one of: (1) `initServiceCenter` config builder if it's a one-shot config (2) a SplashViewModel step hook if the host exposes it (3) a post-`initServiceCenter` async function in main.dart |
-| **Onboarding pretending to be splash** | First-time-user-only content (welcome / permission ask) | NOT a real splash → keep at its prefixed route as a normal feature; reachable from host's "first launch" branch instead |
+| **Logo-only** | `Stack/Image.asset` + `Timer(Duration, () => context.go('/'))` only | **Path A**: replace with `splashLogoAsset` |
+| **Animation / video / 帧序列 (visual-only)** | Multiple frames + Timer.periodic frame stepping, AnimationController, VideoPlayerController, Lottie, etc. WITHOUT business calls | **Path B**: extract to content widget, inject via `splashBackground` (preferred — preserves designer's intended visual) |
+| **Bespoke business init** | Repository / fetch / GetIt / `await registerDevice()` / state mutation | **Path C**: extend-host, distribute side-effects to host's init chain; for the visual part, also Path B if visual is non-trivial |
+| **Onboarding pretending to be splash** | First-time-user-only content (welcome / permission ask) | NOT a real splash → keep at prefixed route as feature page |
 
-### Step 3: Execute (logo-only path — the common case)
+**Default precedence**: when source has any animation/video, prefer Path B over Path A — collapsing a frame animation to a single logo is a visual regression the designer didn't intend. Path A only when source visual is truly a static logo + timer.
 
-1. **Extract source logo asset** — from Phase 0's recorded asset list, pick the primary logo image. If source has multiple splash images (e.g. `splash/1.png` ... `splash/5.png` for a frame animation), pick the first or the "final-frame" one. Document the choice in verify-report.
-2. **Drop source splash route** — remove the corresponding GoRoute from `<src-name>_routes.dart`. Remove the route constant from the constants block.
-3. **Drop source splash widget files** — `git rm` `<sub>/splash/pages/splash_page.dart` and any splash-only widgets it imports. Verify nothing else references them.
-4. **Update host's splash factory call** — patch `lib/main.dart` to pass the chosen logo asset:
+### Step 3: Execute Path A (logo-only)
+
+1. **Extract source logo asset** — from Phase 0's recorded asset list, pick the primary logo image.
+2. **Drop source splash route + widget files** — remove GoRoute, route constant, splash widget file(s).
+3. **Update host's splash factory call** — patch `lib/main.dart`:
    ```dart
-   ...buildBasePageRoutes(splashLogoAsset: 'assets/images/<src-name>/splash/1.png'),
+   ...buildBasePageRoutes(splashLogoAsset: 'assets/images/<src-name>/splash/logo.png'),
    ```
-   Or, for Shape C:
+4. **Keep the logo asset file** at its namespaced path (already there from Phase 2).
+5. **Search for stale references** — `grep -rnE "context\.(go|push)\s*\(\s*'/<src-name>/splash" lib/` must be empty.
+
+### Step 4: Execute Path B (inject-as-splashBackground — preferred for animation/video)
+
+Goal: keep source's bespoke visual experience (frame animation, video, Lottie) but defer ALL navigation / lifecycle / business logic to host's SplashViewModel.
+
+1. **Extract content widget** from `<sub>/splash/pages/splash_page.dart`:
+   - Rename: `lib/features/<src-name>/splash/widgets/<src_name>_splash_content.dart`
+   - Class rename: `SplashPage` → `<SrcName>SplashContent` (e.g. `CuteAnimalSplashContent`)
+   - **Strip the following** (host owns these now):
+     - `Scaffold` wrapper → return directly the visual `Stack` / `Center` / `Image.asset`
+     - `context.go(...)` / `context.push(...)` navigation calls → delete; host's `SplashViewModel` handles routing
+     - `WidgetsBindingObserver` + lifecycle handlers → delete; host handles foreground/background
+     - `SystemChrome.set*` calls → delete; host sets overlay style
+     - Any business init (`await xxxRepository.X`, `GetIt.I<X>`, `register*`, `fetch*`) → goes to Path C destination, NOT this widget
+   - **Keep**:
+     - Animation controllers, frame timer, `precacheImage` (pure visual)
+     - The visual `Image.asset` / `VideoPlayer` / `Lottie` widget
+     - Animation completion: when reached, just `timer.cancel()` and hold final frame (do NOT call `context.go`)
+2. **Delete source splash route + page file** — keep route off, the content widget will be injected at host's existing splash route.
+3. **Inject in `lib/main.dart`**:
    ```dart
-   ServiceCenterConfig.builder()
-     .setLogoIcon('assets/images/<src-name>/splash/1.png')
-     ...
+   ...buildBasePageRoutes(
+     splashBackground: const <SrcName>SplashContent(),
+   ),
    ```
-5. **Keep the logo asset file in `assets/images/<src-name>/splash/`** — already namespaced from Phase 2; do not move. Pubspec already lists this directory.
-6. **Search for stale references** — `grep -rnE "context\.(go|push)\s*\(\s*'/<src-name>/splash" lib/` must be empty. Fix any orphan reference (most likely an internal "back to splash" call, change to host's splash route constant if the intent is to re-trigger the launch flow, or remove if it was decorative).
+4. **Verify host capability** — if Step 1 marked host as L0, you must first do Step 6 (extend host).
 
-### Step 4: Execute (extend-host path — when source has bespoke init)
+### Step 5: Execute Path C (extend-host for bespoke business init)
 
-1. **Audit source splash's init code line-by-line**. For each side-effect, decide its target:
-   - One-shot configuration (`setApiHost`, `loadFeatureFlag` etc.) → fold into host's `ServiceCenterConfig.builder()` chain, or run before `initServiceCenter`
-   - Per-session bootstrap (`registerDevice`, `loadUserProfile`) → likely already in host's SplashViewModel chain — verify; if missing, file as a host-side TODO (not in this skill's scope)
-   - Animation/preload (`precacheImage`, `precacheNetwork`) → keep as a post-`initServiceCenter` non-blocking call
-2. **Drop source splash widget + route** as in Step 3.
-3. **Document the migration** in verify-report: list each source side-effect and its destination.
+Use when source splash has business side-effects beyond visual. Often combined with Path B if the visual part is non-trivial.
 
-### Step 5: Verification (added to Phase 4 scorecard)
+1. **Audit each side-effect line-by-line**, classify destination:
+   | Side-effect kind | Destination |
+   |---|---|
+   | One-shot config (`setApiHost`, `loadFeatureFlag`) | `ServiceCenterConfig.builder()` chain or before `initServiceCenter` |
+   | Per-session bootstrap (`registerDevice`, `loadUserProfile`) | Verify already in host's SplashViewModel; if missing, file host-side TODO |
+   | Visual preload (`precacheImage`, `precacheNetwork`) | Keep in the content widget (Path B), it's still visual |
+   | First-launch-only logic (`if !hasShownGuide`) | Likely belongs in host's guidePage flow, not splash |
+2. **Drop source splash widget + route** (or extract content for Path B if visual is non-trivial).
+3. **Document each migration** in verify-report.
 
-```bash
-# Source splash widget files removed
-test -z "$(find lib/features/<src-name>/splash -type f -name '*.dart' 2>/dev/null)"
-# Source splash route deleted from routes file
-! grep -E "path:\s*'/<src-name>/splash" lib/features/<src-name>/router/<src-name>_routes.dart
-# Logo asset still on disk (referenced by host splash now)
-test -f "<the chosen logo asset path>"
-# Host main.dart references the new logo via splash factory
-grep -E "splashLogoAsset:|setLogoIcon\(" lib/main.dart | grep "<src-name>"
-# No orphan `/cute_animal/splash` references (replace <src-name> in grep)
-! grep -rnE "context\.(go|push)\s*\(\s*'/<src-name>/splash" lib/
+### Step 6: Extend the host (when L0 + source has animation/video)
+
+**This is a host-side change the merge skill is allowed to make**, because:
+(a) it's strictly additive (existing `splashLogoAsset` callers continue working)
+(b) the integration guide adoption is part of the merge contract
+(c) without it, Path B is impossible and Path A would silently regress visual fidelity
+
+Concrete changes (use real shapes seen in the wild as templates):
+
+**Change 1 — pass-through in the route factory**:
+
+```dart
+// Before:
+List<RouteBase> buildBasePageRoutes({String? splashLogoAsset}) => [
+  GoRoute(path: ..., builder: (_, __) => SplashPage(splashLogoAsset: splashLogoAsset ?? '')),
+];
+
+// After:
+List<RouteBase> buildBasePageRoutes({
+  String? splashLogoAsset,
+  Widget? splashBackground,
+}) => [
+  GoRoute(path: ..., builder: (_, __) => SplashPage(
+    splashLogoAsset: splashLogoAsset ?? '',
+    backgroundChild: splashBackground,
+  )),
+];
 ```
 
-All five must pass. Failure → revert that file's changes and add to verify-report's manual-follow-up list.
+If `SplashPage` already has `backgroundChild` parameter (often pre-wired), only the factory needs editing. If not, the SplashPage's `build` also needs a Stack child that uses `backgroundChild` when provided, falls back to `Image.asset(splashLogoAsset)`.
+
+**Change 2 — integration guide section**: add to the host's `INTEGRATION_GUIDE.md` (or equivalent) a "自定义开屏页 UI" / "Custom Splash UI" section. Required contents:
+
+- Two-layer architecture diagram: 视觉层 (custom widget) + 逻辑层 (host's ViewModel)
+- Two API usages: `splashLogoAsset` (single image) vs `splashBackground` (widget)
+- "Writing your splash content" constraints list — 6 don'ts (the same as Step 4 strip list)
+- A 30-line example of a frame-animation content widget
+
+**Change 3 — table in the guide's symbol index**: update the row that documents `buildBasePageRoutes(...)` to include the new param.
+
+After Step 6, treat host as L2 and proceed with Step 4 (Path B).
+
+### Step 7: Verification (added to Phase 4 scorecard)
+
+```bash
+# Source splash route deleted from routes file
+! grep -E "path:\s*'/<src-name>/splash" lib/features/<src-name>/router/<src-name>_routes.dart
+# No orphan source splash route references
+! grep -rnE "context\.(go|push)\s*\(\s*'/<src-name>/splash" lib/
+# Path A: host main.dart references the new logo via splash factory
+# OR
+# Path B: host main.dart references the new content widget via splashBackground
+grep -E "splashLogoAsset:|setLogoIcon\(|splashBackground:" lib/main.dart | grep "<src-name>"
+# Path B: content widget exists and is properly stripped
+if [ "<PATH>" = "B" ]; then
+  test -f "lib/features/<src-name>/splash/widgets/<src_name>_splash_content.dart"
+  # Forbidden patterns inside content widget
+  ! grep -E "Scaffold\(|context\.(go|push)|WidgetsBindingObserver|SystemChrome\." \
+    lib/features/<src-name>/splash/widgets/<src_name>_splash_content.dart
+fi
+# Step 6 (if executed): host factory has the new param
+if [ "<HOST_EXTENDED>" = "yes" ]; then
+  grep -E "Widget\? splashBackground" <host-splash-route-factory-file>
+fi
+```
+
+All applicable checks must pass.
 
 ## Final pass: flutter analyze 0 error
 
