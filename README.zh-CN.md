@@ -17,8 +17,26 @@
 ## 什么时候用
 
 - 你给一个另外 Flutter 项目路径，想把它的 UI 合并到当前 cwd
-- 中文触发词：`复制`、`迁移`、`合并`、`接入`、`嫁接`
-- 英文触发词：`merge`、`migrate`、`graft`
+- 或在 Flutter 项目根目录下说出迁移意图，让 skill 询问要迁移哪个项目
+
+### 触发条件（任一满足即可）
+
+**模式 A —— 路径 + 动词同句**（最明确）：
+- 消息里有一个路径含 `lib/` + `pubspec.yaml`
+- 且含动词关键词：`复制`、`迁移`、`合并`、`接入`、`嫁接`、`merge`、`migrate`、`graft`
+- 例：`把 ../CuteAnimal-main 复制到本项目` / `merge ../foo`
+
+**模式 B —— 独立意图短语，没给路径也触发**：
+- `迁移`（单独出现，处于 Flutter 上下文）—— 如 `帮我迁移一下` / `这个项目要迁移`
+- `flutter迁移` / `Flutter 迁移` / `flutter 迁移项目`（含空格也算）
+- `flutter migration` / `flutter project migration`
+- `合并 flutter 项目` / `把 flutter 项目接入`
+
+模式 B 触发后第一步是 `AskUserQuestion`：「你想迁移哪个 Flutter 项目？请提供项目根目录路径（含 `pubspec.yaml`）」，**不要终止也不要乱猜路径**。
+
+**前置检查**：宿主 cwd 必须是 Flutter 项目（含 `pubspec.yaml` + `flutter:` dep）。否则提示用户先 `cd` 到 Flutter 项目，不开始扫描。
+
+如果用户在非 Flutter 上下文说"迁移"（如数据库迁移、服务器迁移），不应触发——上面的 cwd 检查会拦住。
 
 ## 什么时候不要用
 

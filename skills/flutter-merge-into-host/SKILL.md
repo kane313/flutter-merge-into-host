@@ -1,6 +1,6 @@
 ---
 name: flutter-merge-into-host
-description: "[Flutter projects only — pubspec.yaml with flutter dep present in BOTH the host cwd and the source path the user provides.] Merges another standalone Flutter project's UI code (lib/ + assets/ + pubspec deps) into the current host Flutter project as a self-contained feature subtree. Resolves naming collisions, normalizes deps, rewrites relative imports for the new depth, prefixes all GoRoute paths + literal `context.go/push` strings, namespaces assets, and adapts to the host's CLAUDE.md rules (flutter_screenutil, DebounceUtil, ToastUtil, host theme). Auto-trigger when message contains a path to another Flutter project AND a verb like 'merge / migrate / copy / 复制 / 迁移 / 合并 / graft / 嫁接 / 接入'. Two modes: safe (checkpoint after each of 5 phases) / auto (no pauses, sensible defaults). Output structure: `lib/features/<src-name>/<sub-feature>/{pages,widgets,dialogs}/...` with `<src-name>` as the new feature namespace."
+description: "[Flutter projects only — pubspec.yaml with flutter dep present in the host cwd; source path may be given upfront or asked for after trigger.] Merges another standalone Flutter project's UI code (lib/ + assets/ + pubspec deps) into the current host Flutter project as a self-contained feature subtree. Resolves naming collisions, normalizes deps, rewrites relative imports for the new depth, prefixes all GoRoute paths + literal `context.go/push` strings, namespaces assets, and adapts to the host's CLAUDE.md rules (flutter_screenutil, DebounceUtil, ToastUtil, host theme). Triggers on EITHER (a) message contains a path to another Flutter project AND a verb like 'merge / migrate / copy / 复制 / 迁移 / 合并 / graft / 嫁接 / 接入', OR (b) message contains a standalone phrase '迁移' / 'flutter迁移' / 'Flutter 迁移' / 'flutter migration' / 'flutter project merge' / '合并 Flutter 项目' (even without a path — skill will ask user for the source path as its first step). Two modes: safe (checkpoint after each of 5 phases) / auto (no pauses, sensible defaults). Output structure: `lib/features/<src-name>/<sub-feature>/{pages,widgets,dialogs}/...` with `<src-name>` as the new feature namespace."
 ---
 
 # flutter-merge-into-host
@@ -9,10 +9,29 @@ description: "[Flutter projects only — pubspec.yaml with flutter dep present i
 
 - User provides path to another standalone Flutter project (with its own `lib/`, `pubspec.yaml`, `assets/`)
 - Wants its UI code merged into the **current host** Flutter project (cwd)
-- Keywords: 复制 / 迁移 / 合并 / 接入 / 嫁接 / merge / migrate / graft
-- Auto-trigger: message references a path with `lib/` + `pubspec.yaml` AND host cwd is a Flutter project
 
-**Not for**: page-level Figma reproduction (use `flutter-figma-reproduce` instead), or library publishing (this skill produces in-tree feature code, not a `packages/` module — for that, manual extraction is needed post-merge).
+### Trigger conditions (any ONE is enough)
+
+The skill should activate on either pattern below — do not wait for both.
+
+**Pattern A — path + verb in the same message** (most explicit):
+- Message references a path with `lib/` + `pubspec.yaml` (relative or absolute)
+- AND a verb keyword: `复制` / `迁移` / `合并` / `接入` / `嫁接` / `merge` / `migrate` / `graft`
+- Example: `把 ../CuteAnimal-main 复制到本项目` / `merge ../foo into host`
+
+**Pattern B — standalone intent phrase, no path yet** (skill will ask for path):
+Any of these standalone phrases trigger the skill even without a path in the same message:
+- `迁移` (used alone, in a Flutter context) — e.g. `帮我迁移一下` / `这个项目要迁移`
+- `flutter迁移` / `Flutter 迁移` / `flutter 迁移项目` (with optional spacing)
+- `flutter migration` / `flutter project migration`
+- `合并 flutter 项目` / `merge flutter project` / `graft flutter project`
+- `flutter 项目合并` / `把 flutter 项目接入`
+
+When Pattern B fires WITHOUT a clear source path, the skill's first step is an `AskUserQuestion`: "你想迁移哪个 Flutter 项目？请提供项目根目录路径（含 `pubspec.yaml`）。" Do not abort or assume.
+
+**Sanity check before activating**: host cwd must have `pubspec.yaml` with `flutter:` dep. If not, ask the user to `cd` to a Flutter project first; do not start scanning.
+
+**Not for**: page-level Figma reproduction (use `flutter-figma-reproduce` instead), or library publishing (this skill produces in-tree feature code, not a `packages/` module — for that, manual extraction is needed post-merge). If user types `迁移` in a non-Flutter context (e.g. database migration, server migration), the skill should not activate — the host-cwd Flutter check above guards this.
 
 ## Inputs
 
