@@ -1,0 +1,89 @@
+# Discovery — {{SRC_NAME}}
+
+| Key | Value |
+|---|---|
+| Source path | `{{SOURCE_PATH}}` |
+| Host path | `{{HOST_PATH}}` |
+| Source feature name (derived) | `{{SRC_NAME}}` |
+| Total .dart files | {{FILE_COUNT}} |
+| Total LOC | {{LOC}} |
+| Source `pubspec name` | {{SRC_PUBSPEC_NAME}} |
+| Source `pubspec version` | {{SRC_VERSION}} |
+| Host has `CLAUDE.md` | {{HAS_CLAUDE_MD}} |
+| Host has `flutter_screenutil` | {{HOST_HAS_SCREENUTIL}} ({{HOST_SCREENUTIL_BASELINE}}) |
+| Host re-exports `DebounceUtil` / `ToastUtil` from | {{HOST_UTIL_PKG}} |
+
+## Source structure
+
+```
+{{SOURCE_TREE_TOP_2_LEVELS}}
+```
+
+### Per-feature files
+
+| Sub-feature | Files | Has pages/ | Has widgets/ | Has dialogs/ |
+|---|---|---|---|---|
+{{PER_FEATURE_TABLE}}
+
+## Source deps
+
+| Dep | Source version | Host version | Conflict | Planned action |
+|---|---|---|---|---|
+{{DEPS_TABLE}}
+
+## Source assets
+
+| Path | Type |
+|---|---|
+{{ASSETS_TABLE}}
+
+## Source routes
+
+| path | builder | extra type |
+|---|---|---|
+{{ROUTES_TABLE}}
+
+### Hardcoded `context.go/push` literals (Phase 2 must prefix-rewrite)
+
+```
+{{ROUTE_LITERAL_GREP_OUTPUT}}
+```
+
+## Collision matrix
+
+### Class name collisions (host class shadowed by source)
+
+| Class name | Host file | Source file | Resolution |
+|---|---|---|---|
+{{CLASS_COLLISION_TABLE}}
+
+### Route path collisions
+
+| Path | Host route | Source route | Resolution |
+|---|---|---|---|
+{{ROUTE_COLLISION_TABLE}}
+
+### Asset folder collisions
+
+| Path | Host | Source | Resolution |
+|---|---|---|---|
+{{ASSET_COLLISION_TABLE}}
+
+## Host conventions inventory
+
+- `lib/features/<X>/pages/` subdir convention: {{HOST_USES_PAGES_DIR}}
+- `lib/shared/widgets/` exists: {{HOST_HAS_SHARED_WIDGETS}}
+- `lib/theme/` exists: {{HOST_HAS_THEME}}
+- ScreenUtil baseline: {{HOST_SCREENUTIL_BASELINE}}
+- Mandatory rules from host `CLAUDE.md`:
+{{HOST_CLAUDE_RULES}}
+
+## Recommended Phase 1 decisions (for auto mode, or user reference)
+
+- **Placement**: single root → `lib/features/{{SRC_NAME}}/`
+- **Adaptation depth**: {{RECOMMENDED_DEPTH}}
+- **Deps**: add all, version-bump source to host where conflicting
+
+## Risks flagged
+
+{{RISK_FLAGS}}

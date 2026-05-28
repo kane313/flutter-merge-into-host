@@ -1,0 +1,74 @@
+# Verify Report — {{SRC_NAME}}
+
+## Compile status
+
+| Check | Result |
+|---|---|
+| `flutter analyze lib/features/{{SRC_NAME}}/ lib/main.dart` | {{ANALYZE_RESULT}} (0 error required) |
+| Errors | {{ERROR_COUNT}} |
+| Warnings | {{WARNING_COUNT}} |
+| Info-level lints | {{INFO_COUNT}} (acceptable) |
+
+## Asset existence
+
+| Check | Result |
+|---|---|
+| Total asset paths referenced in code | {{ASSET_TOTAL}} |
+| Missing on disk | {{ASSET_MISSING_COUNT}} |
+
+{{ASSET_MISSING_BLOCK}}
+
+## Pubspec asset registration
+
+| Asset directory | Registered? |
+|---|---|
+{{ASSET_REGISTRATION_TABLE}}
+
+## Route literal verification
+
+| Total `context.go/push` literals in grafted code | {{ROUTE_LITERAL_COUNT}} |
+| Not prefixed with `/{{SRC_NAME}}/` | {{ROUTE_LITERAL_UNPREFIXED_COUNT}} |
+
+{{ROUTE_LITERAL_UNPREFIXED_BLOCK}}
+
+## GoRoute registered vs called
+
+| Called but not registered | {{ROUTE_ORPHAN_COUNT}} |
+| Registered but not called | {{ROUTE_UNUSED_COUNT}} (informational) |
+
+{{ROUTE_ORPHAN_BLOCK}}
+
+## Naming collision residuals
+
+| Collision class | Resolved via alias? | Unaliased references in host? |
+|---|---|---|
+{{COLLISION_RESIDUAL_TABLE}}
+
+## Structural conflict warnings
+
+{{STRUCTURAL_WARNINGS_BLOCK}}
+
+Common patterns to check (auto-detected best-effort):
+
+- Source `<X>Page` self-Scaffolds with `BottomNavigationBar` → may stack with host's nav
+- Source uses `extendBodyBehindAppBar: true` → host wrapper should preserve transparent AppBar
+- Source declares custom font in pubspec → user must copy font assets
+
+## Manual smoke-test checklist
+
+After running `flutter analyze` clean, the user must:
+
+- [ ] 1. **Hot-restart** (capital `R` in terminal — NOT lowercase `r`). Asset manifest re-reads only on restart.
+- [ ] 2. Navigate to `/{{SRC_NAME}}/<initial-route>` from host's entry point.
+- [ ] 3. Tick each grafted route below as you verify the page loads + renders correctly:
+{{ROUTE_CHECKBOX_LIST}}
+- [ ] 4. Tap each base button on a representative page — confirm Debounce takes effect (rapid double-tap should not double-fire).
+- [ ] 5. If source had toasts: trigger a toast-emitting action; confirm it surfaces via host's ToastUtil.
+
+## Verdict
+
+{{VERDICT}}
+
+## Stage 2 follow-ups (if any)
+
+{{STAGE2_FOLLOWUPS}}

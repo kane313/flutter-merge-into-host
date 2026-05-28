@@ -1,0 +1,167 @@
+# Phase 3: Adapt
+
+## Goal
+Apply host CLAUDE.md rules to the grafted code: flutter_screenutil suffixes everywhere, `DebounceUtil` on tappables, `ToastUtil` instead of source's toast impl, host theme integration, host route helpers (e.g. `pushSingleTop` if defined). Skip in `light` mode.
+
+## Orchestration
+
+1. **Read** host `CLAUDE.md` (if present) to confirm the rules in scope. If absent, advance with empty rule set (no-op for Phase 3).
+2. **Read** plan.md "Host adapter rules to apply" section.
+3. **Apply each rule with the techniques in this doc**. Heavy mode applies all; light mode skips screenutil + Debounce; as-is skips Phase 3 entirely.
+
+## Rule 1: flutter_screenutil (`.w / .h / .sp / .r`) everywhere
+
+This is the most invasive transform. **Mandatory pre-flight**:
+
+1. **Confirm host has `flutter_screenutil` in pubspec** (direct dep or re-exported via host's `lib_core` / similar). If absent and host CLAUDE.md mentions screenutil, prompt user to set it up first.
+2. **Add `import 'package:flutter_screenutil/flutter_screenutil.dart';`** to every grafted `.dart` file that didn't already have it (or import `lib_core` if that's host convention). Skip barrel/router files with no dimensional code.
+
+### Execution order (critical — see failure-modes.md)
+
+The naive approach "sed `fontSize: N` → `fontSize: N.sp`" fails because `.sp` is an instance getter and can't appear in `const` expressions. You must STRIP const FIRST, then add screenutil suffixes.
+
+```bash
+# Step A: Strip const from widgets that will contain instance getters
+find lib/features/<src-name> -name "*.dart" | while read f; do
+  perl -i -pe '
+    s/\bconst\s+TextStyle\(/TextStyle(/g;
+    s/\bconst\s+SizedBox\(/SizedBox(/g;
+    s/\bconst\s+EdgeInsets\./EdgeInsets./g;
+    s/\bconst\s+Offset\(/Offset(/g;
+    s/\bconst\s+BoxConstraints\(/BoxConstraints(/g;
+    s/\bconst\s+Padding\(/Padding(/g;
+    s/\bconst\s+BorderRadius\./BorderRadius./g;
+    s/\bconst\s+Radius\./Radius./g;
+    s/\bconst\s+BoxShadow\(/BoxShadow(/g;
+    s/\bconst\s+Icon\(/Icon(/g;
+    s/\bconst\s+Text\(/Text(/g;
+    s/\bconst\s+Positioned\(/Positioned(/g;
+    s/\bconst\s+\[/\[/g;
+    s/\bconst\s+<([^>]+)>\s*\[/<$1>\[/g;
+  ' "$f"
+done
+
+# Step B: Add screenutil suffixes
+find lib/features/<src-name> -name "*.dart" | while read f; do
+  perl -i -pe '
+    s/(fontSize:\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/\1\2.sp/g;
+    s/(\bwidth:\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/\1\2.w/g;
+    s/(\bheight:\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/\1\2.h/g;
+    s/(EdgeInsets\.all\()(\d+(?:\.\d+)?)(\))/$1$2.r$3/g;
+    s/(horizontal:\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/$1$2.w/g;
+    s/(vertical:\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/$1$2.h/g;
+    s/(\b(?:top|bottom):\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/$1$2.h/g;
+    s/(\b(?:left|right):\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/$1$2.w/g;
+    s/(BorderRadius\.circular\()(\d+(?:\.\d+)?)(\))/$1$2.r$3/g;
+    s/(Radius\.circular\()(\d+(?:\.\d+)?)(\))/$1$2.r$3/g;
+    s/(blurRadius:\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/$1$2.r/g;
+    s/(spreadRadius:\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/$1$2.r/g;
+    s/(\bsize:\s*)(\d+(?:\.\d+)?)(?![.\d]|\s*\.[swhr]p?\b)/$1$2.r/g;
+  ' "$f"
+done
+
+# Step C: Analyze; expect const_eval_extension_method errors
+flutter analyze lib/features/<src-name>/ 2>&1 | grep -E "^\s*error\s"
+```
+
+### Step D: Edge cases (manual fixes per remaining error)
+
+After Step A+B, residual errors are predictable:
+
+| Error pattern | Fix |
+|---|---|
+| `Extension methods can't be used in constant expressions` on `static const TextStyle X = TextStyle(fontSize: N.sp,...)` | `static const` → `static final` |
+| Same on `static const List<BoxShadow> X = [...]` | `static const` → `static final`; each inner `const Color/Offset` preserved |
+| Same on top-level `const TextStyle _X = TextStyle(...)` | `const TextStyle _X` → `final TextStyle _X` |
+| Same on `decoration: const BoxDecoration(...)` containing `BorderRadius.circular(N.r)` | Remove the `const`; preserve internal `const Color(...)` |
+| Same on `const Column(...children: [...Text(fontSize: N.sp)])` | Remove outer `const` |
+| `non_constant_default_value` on `this.x = [...]` (was `const [...]`) | Restore `const`: `this.x = const [...]` |
+| `non_constant_default_value` on `this.padding = EdgeInsets.symmetric(horizontal: X)` | Restore `const`: `this.padding = const EdgeInsets.symmetric(horizontal: X)` (X must be const itself) |
+| `int` parameter wrongly got `.r` (e.g. `getAssetListPaged(size: 1.r)`) | Revert: `size: 1` (sed false positive on non-pixel int args) |
+
+### Theme tokens trade-off
+
+If source has design tokens like `AppSpacing.lg = 16` and host CLAUDE.md mandates screenutil, you have two paths:
+
+| Path | Pros | Cons |
+|---|---|---|
+| **Keep `const double` tokens** (do not change `AppSpacing` itself) | All `const SizedBox(height: AppSpacing.xxl)` keep working | ~7% visual drift between source designSize (e.g. 375) and host designSize (e.g. 402) for spacing-only values |
+| Change tokens to `static double get xxx => N.r` getters | True screenutil-adaptive | Breaks 30-60 `const` callsites; cascading const-chain removal |
+
+Default for auto mode: **keep const tokens**. This is the trade-off seen in real run (cute_animal merge); the 7% drift is invisible on spacing. Heavy-mode users wanting strict compliance can switch later by manually de-const-ing affected sites.
+
+## Rule 2: DebounceUtil on tappables
+
+Locate the source's base button widgets (typically `app_button.dart`, `app_circle_icon_button.dart`, or whatever wraps the main `onPressed`/`onTap` API). Wrap in **state-level cache** to avoid rebuilding the debounced closure each `build`:
+
+```dart
+class _AppButtonState extends State<AppButton> {
+  VoidCallback? _debouncedOnPressed;
+
+  @override
+  void initState() {
+    super.initState();
+    _debouncedOnPressed = DebounceUtil.debounce(widget.onPressed);
+  }
+
+  @override
+  void didUpdateWidget(AppButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.onPressed, widget.onPressed)) {
+      _debouncedOnPressed = DebounceUtil.debounce(widget.onPressed);
+    }
+  }
+
+  // in build:
+  // onTap: _debouncedOnPressed
+}
+```
+
+Why state-cache and not `onTap: DebounceUtil.debounce(widget.onPressed)`: latter creates a new wrapper every build, breaking debounce state (each tap → fresh lastClickTime).
+
+Add `import 'package:lib_core/lib_core.dart';` (or wherever host re-exports DebounceUtil).
+
+**Do not wrap individual `GestureDetector.onTap` sites in the grafted code** — too invasive. Base-widget wrap covers ~80% of taps; the remaining are rare enough to defer.
+
+## Rule 3: Toast replacement
+
+If source has a custom toast impl (e.g. `AppToast.show(context, msg)`):
+
+1. Grep `AppToast.show(` in grafted code
+2. Replace each call with host's `ToastUtil.show(msg)` (drop `context` param; host's util uses overlay or scaffold)
+3. If `AppToast` is exported by a barrel: edit the barrel to remove that export
+4. Delete the `app_toast.dart` source file (already not copied per plan.md drop list)
+
+If source has no toast impl, skip.
+
+## Rule 4: Host theme integration
+
+If host has `lib/theme/` with `ThemeData`, the grafted code's hardcoded colors should ideally migrate. **Conservative default**: leave source colors alone (per-feature constants). Migration to host theme is a follow-up refactor, not part of merge.
+
+Only do the migration if source colors map 1:1 to host theme tokens. Otherwise visual fidelity suffers.
+
+## Rule 5: go_router version match
+
+If source used go_router APIs that changed in the host's version (e.g. v17 → v14):
+
+- `state.uri.queryParameters` — same in v6+
+- `state.extra` — same
+- `GoRoute(path, builder)` — same
+- `ShellRoute`, redirects: API may have changed; check release notes
+
+Fix any breakage per analyze errors. If APIs diverge irreconcilably, ask user whether to bump host go_router or fork the source code.
+
+## Final pass: flutter analyze 0 error
+
+After all rule applications:
+```bash
+flutter analyze lib/features/<src-name>/ lib/main.dart
+```
+must show `0 error`. Info-level lints (`always_use_package_imports`, `prefer_const_constructors`) are acceptable; they're style-only and the const-strip step inevitably introduces some.
+
+Auto mode: log `[AUTO] Phase 3 done: <N> screenutil sites, <M> Debounce wraps, <K> manual const fixes.`
+
+## Stopping conditions
+
+- After 3 sed-iterate-fix cycles in screenutil rule, > 10 errors remain → abort to user; the source may have unusual const patterns (e.g. `const factory` constructors)
+- DebounceUtil not exported by host's lib_core / similar → abort, ask user to point to the right import

@@ -1,0 +1,87 @@
+# Plan — {{SRC_NAME}}
+
+## Decisions
+
+| # | Decision | Choice | Rationale |
+|---|---|---|---|
+| 1 | Placement | {{PLACEMENT}} | {{PLACEMENT_RATIONALE}} |
+| 2 | Adaptation depth | {{DEPTH}} | {{DEPTH_RATIONALE}} |
+| 3 | Deps strategy | {{DEPS_STRATEGY}} | {{DEPS_RATIONALE}} |
+
+## File mapping
+
+| Source path | Target path | Action |
+|---|---|---|
+{{FILE_MAPPING_TABLE}}
+
+(Action: `copy` / `drop` / `rewrite`)
+
+## Naming-collision alias plan
+
+For each collision, the consumer site uses `import as <alias>`. Source files stay untouched.
+
+| Collision class | Source file | Alias import (added to consumer) | Consumer file |
+|---|---|---|---|
+{{COLLISION_ALIAS_TABLE}}
+
+## Route prefix rewrite table
+
+| Source path / literal | Target path / literal |
+|---|---|
+{{ROUTE_REWRITE_TABLE}}
+
+Sed rules to execute in Phase 2 (one per literal):
+
+```bash
+{{ROUTE_REWRITE_SED_BLOCK}}
+```
+
+## Asset namespace rewrite table
+
+| Source path | Target path | Files |
+|---|---|---|
+{{ASSET_REWRITE_TABLE}}
+
+Sed rules to execute in Phase 2:
+
+```bash
+{{ASSET_REWRITE_SED_BLOCK}}
+```
+
+Pubspec additions:
+
+```yaml
+assets:
+{{PUBSPEC_ASSETS_BLOCK}}
+```
+
+## Deps merge plan
+
+```yaml
+dependencies:
+  # cute_animal feature deps
+{{PUBSPEC_DEPS_BLOCK}}
+```
+
+Versions that diverge from source:
+
+| Dep | Source asked | Host requires | Reason |
+|---|---|---|---|
+{{DEPS_VERSION_DIVERGE_TABLE}}
+
+## Host adapter rules to apply in Phase 3
+
+(Per Decision 2 — `heavy` mode applies all rows; `light` mode skips rows marked optional.)
+
+| Rule | Optional? | Targets in source code |
+|---|---|---|
+| flutter_screenutil suffixes | no (if `heavy`) | all .dart files with hardcoded width/height/fontSize |
+| DebounceUtil on tappables | no (if `heavy`) | source's base button widgets only |
+| Toast replacement | no (if source has toast) | `AppToast.show(...)` calls |
+| Host theme integration | yes (conservative skip) | source's color literals |
+| go_router API compat | no (if version diverges) | `state.*` usages |
+{{ADAPTER_RULES_EXTRA}}
+
+## Risks
+
+{{PHASE2_RISKS}}
