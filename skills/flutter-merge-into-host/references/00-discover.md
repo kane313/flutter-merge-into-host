@@ -61,6 +61,23 @@ Build a structured inventory of the source Flutter project + a conflict matrix a
    grep -rlE "PageView|TabBarView" SOURCE/lib/features --include="*.dart" 2>/dev/null > /tmp/has-pageview
    # Candidate = (has-tabs ∩ has-list) − has-pageview
    comm -12 <(sort /tmp/has-tabs) <(sort /tmp/has-list) | comm -23 - <(sort /tmp/has-pageview)
+
+   # j. Splash (开屏) page detection — Phase 3 may replace with host's central splash module
+   # Source-side: dir name / file name / router initialLocation
+   find SOURCE/lib -type d -name "splash*" -o -name "launch*" -o -name "boot*" 2>/dev/null
+   find SOURCE/lib -name "splash_page.dart" -o -name "splash_screen.dart" -o -name "launch_page.dart" 2>/dev/null
+   grep -nE "initialLocation:\s*'/splash" SOURCE/lib/router.dart SOURCE/lib/main.dart 2>/dev/null
+   grep -rnE "GoRoute\(\s*path:\s*'/splash" SOURCE/lib --include="*.dart"
+   # Source splash's logo asset (typically a single image referenced inside the splash widget)
+   grep -rhoE "'assets/[^']*(splash|logo|launch)[^']*'" SOURCE/lib --include="*.dart" | sort -u
+
+   # k. Host-side central splash module — determines whether Rule 7 (Phase 3) is applicable
+   # Pattern 1: host pubspec depends on a module_base_page / module_splash / similar
+   grep -E "^\s*(module_base_page|module_splash|lib_splash|base_page):" HOST/pubspec.yaml
+   # Pattern 2: host main.dart uses a factory like `buildBasePageRoutes(splashLogoAsset:)` or sets a custom initial route
+   grep -nE "buildBasePageRoutes|splashLogoAsset|SplashViewModel|BasePageRouteConstant\.splash" HOST/lib/main.dart 2>/dev/null
+   # Pattern 3: host has an integration guide mentioning splash
+   grep -nE "开屏页|splash" HOST/packages/INTEGRATION_GUIDE.md HOST/CLAUDE.md 2>/dev/null | head -5
    ```
 
 4. **Collision detection against host** (5 categories)
@@ -140,3 +157,25 @@ See `templates/discovery.md.tmpl`. Key sections the user reviews:
   ```
 
   Use this report in Phase 1 to surface a 4th `AskUserQuestion` decision ("which tab row drives PageView") when 2 rows are detected; if only 1, decision is mechanical and auto mode applies it.
+
+- **Splash module integration plan** — populated from items `j` (source splash) + `k` (host central splash):
+
+  ```
+  - Source splash detected: <yes/no>
+    - File(s): <path(s)>
+    - Logo asset(s): <path(s)>
+    - Router entry path: <e.g. /splash, /, /cute_animal/splash>
+    - Initialization side-effects: <list any device-register / API-prefetch / animation / timer logic — affects Phase 3 strategy>
+  - Host central splash module detected: <yes/no>
+    - Module package: <e.g. module_base_page>
+    - Route registration factory: <e.g. buildBasePageRoutes(splashLogoAsset: ...)>
+    - Route constant: <e.g. BasePageRouteConstant.splash>
+    - ViewModel: <e.g. SplashViewModel from get_it>
+    - Integration guide reference: <path/section>
+  - Recommended Phase 3 action: <one of below>
+    - replace-with-host: source splash is logo-only → drop source splash widget + route; pass source logo asset to host's splashLogoAsset factory parameter
+    - extend-host: source splash has bespoke business init → keep host's splash flow as entry; port source's init side-effects as a step in host's SplashViewModel chain (or as a post-`initServiceCenter` hook)
+    - keep-source: host has no central splash module → leave source splash intact at its prefixed route
+  ```
+
+  Phase 3 Rule 7 consumes this plan directly.

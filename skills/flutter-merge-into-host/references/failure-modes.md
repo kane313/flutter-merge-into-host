@@ -101,6 +101,18 @@ AI scans this at the start of every phase to avoid repeating known mistakes.
 
 - ✗ Picking the wrong tab row when there are two. Pages with a top SwitchTab AND a secondary filter chip row will look ambiguous — "下面的分类" could mean either. The chip row closest to the content list is the conventional linkage target, but ask the user before wiring. Re-wiring later is cheap; first-time mis-wire wastes a round-trip.
 
+## Phase 3 (Adapt) — Splash integration
+
+- ✗ Leaving source's splash page intact as a reachable route (e.g. `/<src-name>/splash`) when the host has a central splash module (typically `module_base_page` or similar exporting `BasePageRouteConstant.splash` + `buildBasePageRoutes()`). Symptom is invisible during compile — both splashes work in isolation — but the source splash bypasses host's agreement gate / device-register / token-bootstrap / launch-ad pipeline. The user never sees the agreement screen (legal exposure), API calls 401 because no token bootstrap ran, ad revenue evaporates. **正解**: Phase 3 Rule 7 detects this, drops source splash widget + route, passes source's logo asset to the host's splash factory parameter (e.g. `buildBasePageRoutes(splashLogoAsset: 'assets/images/<src-name>/splash/1.png')`).
+
+- ✗ Assuming "splash" means logo-only. Some sources stash bespoke init logic (device register, preload, feature flag fetch) inside the splash widget's `initState`. Just dropping the widget loses these side-effects. **正解**: Phase 3 Step 2 classifies source splash by side-effects via grep (`await`, `.then(`, `GetIt`, `register`, `fetch`); for the bespoke-init class, each side-effect needs an explicit migration destination — config builder / SplashViewModel step / post-`initServiceCenter` hook. Document each in plan.md's splash integration table.
+
+- ✗ Identifying "splash" by file path or class name only. Sometimes a `splash_page.dart` is actually an onboarding flow (permission ask, welcome carousel) that runs once for first-time users — not a true launch splash. Dropping it loses the onboarding. **正解**: classification grep distinguishes "logo + timer-then-navigate" (real splash) from "multi-page content + first-launch-only-flag" (onboarding). Onboarding stays as a feature page.
+
+- ✗ Keeping the source splash's logo asset registered in pubspec but losing the reference in code after dropping the widget. Asset is shipped but unused, bloats the install. **正解**: if Phase 3 chooses `replace-with-host` strategy, the logo asset stays because host's splash now uses it. If the source splash had multiple logo frames (animation) and only one is reused, drop the unused frames from pubspec and disk in Phase 4 cleanup.
+
+- ✗ Forgetting to remove the source splash route constant from `<src-name>_routes.dart` after dropping the widget. Compile errors point to the dangling import; user thinks the merge failed. **正解**: delete the GoRoute entry + the route constant line + the widget file together as one atomic edit.
+
 ## Phase 3 (Adapt) — post-cleanup
 
 - ✗ Adding `import 'package:flutter_screenutil/...'` to every grafted .dart file as a Phase 3 prep step, then forgetting to remove it from files that turned out not to need it (after self-rolled scaling code was stripped). Symptom: `unused_import` warnings, host's `very_good_analysis` (or similar lint) treats as actionable. **Final pass**: `grep -L "\.\\(sp\\|w\\|h\\|r\\)\\b" lib/features/<src-name>/**/*.dart | xargs -I {} sed -i '' "/^import 'package:flutter_screenutil\\/.*';$/d" {}` — removes the import from files that don't reference any scaling getter.

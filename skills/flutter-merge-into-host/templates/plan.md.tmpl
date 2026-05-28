@@ -81,6 +81,7 @@ Versions that diverge from source:
 | Host theme integration | yes (conservative skip) | source's color literals |
 | go_router API compat | no (if version diverges) | `state.*` usages |
 | Rule 6: category-list → PageView linkage | no (if Phase 0 detected candidates) | see "PageView linkage targets" section below |
+| Rule 7: splash → host's central splash module | no (if host has central splash AND source has splash) | see "Splash integration plan" section below |
 {{ADAPTER_RULES_EXTRA}}
 
 ## PageView linkage targets (Rule 6)
@@ -99,6 +100,34 @@ Skip reasons that opt a candidate out of Rule 6:
 - Tabs are sectional (form/settings), not data-axis
 
 Each row marked "Skip" must include a reason — empty skip cells abort the plan generation.
+
+## Splash integration plan (Rule 7)
+
+Populated from Phase 0 items `j` (source splash) + `k` (host central splash). Drives Phase 3 Rule 7.
+
+| Field | Value |
+|---|---|
+| Source splash file(s) | {{SRC_SPLASH_FILES}} |
+| Source splash route | {{SRC_SPLASH_ROUTE}} |
+| Source splash logo asset(s) | {{SRC_SPLASH_LOGO}} |
+| Source splash classification | {{SRC_SPLASH_KIND}} (logo-only / logo+animation / bespoke-init / onboarding) |
+| Host central splash module | {{HOST_SPLASH_MODULE}} (e.g. module_base_page) |
+| Host splash factory | {{HOST_SPLASH_FACTORY}} (e.g. `buildBasePageRoutes(splashLogoAsset:)`) |
+| Host splash route constant | {{HOST_SPLASH_ROUTE_CONST}} (e.g. `BasePageRouteConstant.splash`) |
+| Host integration guide path | {{HOST_INTEGRATION_GUIDE}} |
+| Strategy | {{SPLASH_STRATEGY}} (replace-with-host / extend-host / keep-source) |
+| Chosen logo to pass to host | {{CHOSEN_LOGO_PATH}} |
+| Source init side-effects to port (if extend-host) | {{SRC_SPLASH_INIT_LIST}} |
+
+If `Strategy = keep-source`, mark Rule 7 as skipped in the adapter rules table and document why (typically: host has no central splash module).
+
+If `Strategy = extend-host`, each row in `Source init side-effects to port` must include the destination decision:
+
+| Side-effect | Destination |
+|---|---|
+| (example) `await registerDevice()` | already covered by host SplashViewModel — drop |
+| (example) `precacheImage(splashBg)` | move to post-`initServiceCenter` in main.dart |
+| (example) `_loadFeatureFlag()` | fold into `ServiceCenterConfig.builder()` chain |
 
 ## Risks
 
