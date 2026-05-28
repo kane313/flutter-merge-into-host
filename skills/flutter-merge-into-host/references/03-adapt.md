@@ -495,6 +495,133 @@ fi
 
 All applicable checks must pass.
 
+## Rule 8: Widget file split when files exceed readability thresholds
+
+**When this rule fires**: scan every grafted `.dart` file under `lib/features/<src-name>/`. Any file that trips ANY of these thresholds must be split:
+
+- file LOC > 300
+- file contains > 5 `class _<Foo> extends (Stateless|Stateful)Widget` private widget classes
+- file declares > 10 file-level / static `const` design tokens (colors, asset paths, spec rows)
+
+Sources written as a single mega-file (1000+ LOC pages with 15+ private widgets) are common; grafting drops them into the host unchanged. Reviewing or surgically editing those files later — by a human or by Claude — is hostile when each file has a dozen widgets fighting for attention.
+
+### Scan command (Phase 3 runs this once after Phase 2 succeeds)
+
+```bash
+printf "%-90s %6s %6s\n" "file" "LOC" "_priv"
+find lib/features/<src-name> -name "*.dart" | sort | while read f; do
+  loc=$(wc -l < "$f")
+  priv=$(grep -cE "^class _[A-Z]" "$f")
+  if [ "$loc" -gt 300 ] || [ "$priv" -gt 5 ]; then
+    printf "%-90s %6d %6d\n" "$f" "$loc" "$priv"
+  fi
+done
+```
+
+Record matches in plan.md's "Widget split targets" section. Auto mode splits every match; safe mode surfaces a single CHECKPOINT confirming the split list before executing.
+
+### Target layout per split file
+
+```
+lib/features/<src-name>/<sub>/
+├── pages/
+│   └── <sub>_page.dart           # page entry; thin (Scaffold + Stack + composed widgets)
+├── widgets/                      # one file per logical region
+│   ├── <sub>_<region_a>.dart
+│   ├── <sub>_<region_b>.dart
+│   └── ...
+├── dialogs/                      # popup-style flows
+└── models/                       # data specs / enums shared across widgets
+    └── <name>.dart
+```
+
+### Step 1: Group widgets by region, not one-per-file
+
+A page with 12 private widgets does NOT split into 12 files. Group widgets that compose together (region-of-the-screen, or "card + its parts"). Each group becomes one file; widgets used only inside the group stay `_` private inside that file. Only the entry widget the page directly mounts goes public.
+
+Example from cute_animal merge (settings_popup.dart had 10 private widgets):
+
+| File | Public entry | Private internals |
+|---|---|---|
+| `widgets/settings_header_section.dart` | `SettingsHeader`, `SettingsVipBanner` | `_GuestHeaderActions`, `_PhonePill`, `_VipBannerButton` |
+| `widgets/settings_card.dart` | `SettingsCard`, `SettingsRow`, `SettingsDivider` | — |
+| `widgets/settings_footer.dart` | `SettingsFooter` | — |
+| `models/user_membership_state.dart` | `enum UserMembershipState` | — |
+
+Three widget files + one model file replaced the 722-line monolith. Page entry shrank to 321 lines.
+
+### Step 2: Rename private widgets used cross-file → public with feature prefix
+
+`_FooBar` used outside its origin file → `<SrcName><FooBar>` (e.g. `_SettingsHeader` → `SettingsHeader`, `_GridCard` → `CategoryGridCard`). Same-file-only private widgets keep their `_` prefix.
+
+**Why feature prefix**: source merger may have multiple sub-features all calling something `_HeaderCard`; once exported as `HeaderCard`, host import resolution becomes ambiguous. `<SrcName>HeaderCard` keeps them distinct.
+
+### Step 3: Top-level `const` accessed across files needs file-level scope
+
+Source's mega-file often has `class _FooDelegate { static const double _kHorizPad = 16; }` referenced by the enclosing State class via `_FooDelegate._kHorizPad`. Once `_FooDelegate` moves to a new file, the State class can't reach `._kHorizPad` (private static).
+
+Two options:
+
+| Path | Edit | Trade-off |
+|---|---|---|
+| Promote class to public AND const to public | `_FooDelegate._kHorizPad` → `FooDelegate.kHorizPad` | More cross-file access, but verbose call sites |
+| Lift const to file-level top of new file | `const double kFooDelegateHorizPad = 16;` outside the class | Cleaner call sites; needs the same const accessible from the new file's exports |
+
+Default to **file-level top consts** (cleaner) when ≤ 3 consts cross the boundary. Promote class statics when there are many.
+
+### Step 4: Sed-rewrite the page entry's references
+
+Use `perl -i -pe` (BSD `sed \b` is unsupported) to rename in one pass:
+
+```bash
+perl -i -pe '
+  s/\b_FooBar\b/<SrcName>FooBar/g;
+  s/\b_FooDelegate\._kHorizPad\b/k<SrcName>FooHorizPad/g;
+  s/\b_FooDelegate\b/<SrcName>FooDelegate/g;
+' lib/features/<src-name>/<sub>/pages/<sub>_page.dart
+```
+
+Order matters when one rename is a substring of another (e.g. `_Foo` and `_FooBar`) — list the longer match first.
+
+### Step 5: Truncate the page file + add imports
+
+```bash
+# Drop the extracted lines (preserving everything before the first private widget)
+awk 'NR<=<last-keep-line>' lib/features/<src-name>/<sub>/pages/<sub>_page.dart > /tmp/p.dart
+mv /tmp/p.dart lib/features/<src-name>/<sub>/pages/<sub>_page.dart
+
+# Add imports for the new widget/model files
+# (Edit tool to insert next to existing relative imports)
+```
+
+After truncation, `flutter analyze` will surface stale imports (now `unused_import` warnings). Delete them.
+
+### Step 6: Verification (added to Phase 4 scorecard)
+
+```bash
+# Each split-target file under threshold
+find lib/features/<src-name> -name "*.dart" | while read f; do
+  loc=$(wc -l < "$f")
+  priv=$(grep -cE "^class _[A-Z]" "$f")
+  [ "$loc" -gt 300 ] && echo "STILL_OVER: $f ($loc lines)"
+  [ "$priv" -gt 5 ] && echo "STILL_PRIV: $f ($priv private widgets)"
+done
+# Output should be empty OR only files documented in plan.md as "intentionally over" with a reason
+```
+
+### Skip conditions (file stays unsplit even when over threshold)
+
+- **State class itself is the bulk** (e.g. `_StudioPageState` 800 lines with init / dispose / lifecycle / 20+ build helpers). Widget split won't help — needs a State-level refactor (extract camera controller, gallery controller, animation controller etc. into mixins or controller-style classes). Out of merge scope; flag in verify-report as "follow-up: State class refactor for `<file>` (LOC=N)".
+- **Generated code** (build_runner output `.g.dart` / `.freezed.dart`) — never split.
+- **Single huge enum / data table** that's read-only data, not widget code — keep as-is.
+
+### Anti-patterns
+
+- ✗ Splitting into too many files (< 50 lines each) — composition tax beats readability gain. Aim 80-250 lines per file.
+- ✗ Promoting EVERY private widget to public — bloats the feature's public surface area. Only the entry widgets the page mounts should be public.
+- ✗ Re-exporting via a `widgets.dart` barrel after splitting — kills the locality benefit of splitting. Each page imports only the widget files it needs.
+- ✗ Leaving stale relative imports after extraction — analyzer flags as `unused_import`; cleanup as part of Step 5.
+
 ## Final pass: flutter analyze 0 error
 
 After all rule applications:

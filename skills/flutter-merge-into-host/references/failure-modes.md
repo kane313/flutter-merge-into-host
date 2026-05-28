@@ -117,6 +117,22 @@ AI scans this at the start of every phase to avoid repeating known mistakes.
 
 - ✗ Forgetting to remove the source splash route constant from `<src-name>_routes.dart` after dropping the widget. Compile errors point to the dangling import; user thinks the merge failed. **正解**: delete the GoRoute entry + the route constant line + the widget file together as one atomic edit.
 
+## Phase 3 (Adapt) — Widget file split
+
+- ✗ Reading source's mega-file (1000+ LOC, 15+ private widgets) as "complex but functional, leave alone". Reviewing or surgically editing is hostile when each file has a dozen widgets fighting for attention; future Claude edits in that file have high miss-rate. **正解**: Rule 8 scan automates the threshold check (LOC > 300 / > 5 private widgets / > 10 const tokens) and splits by region groups, not one-widget-per-file.
+
+- ✗ Splitting State class with State+widget split. A `_PageState` 800 lines tall is NOT solved by extracting nested widget classes — the State class itself is the bulk. The right refactor is to extract its responsibilities (camera, gallery, animation controllers) into mixins or controller classes. **正解**: Rule 8 Skip condition explicitly flags this case as out-of-scope for merge; verify-report lists it as "follow-up: State class refactor".
+
+- ✗ Promoting every `_FooBar` private widget to public during split. Bloats feature's public surface; consumers outside the feature start importing internals (`SettingsRow`, `SettingsDivider`) that were never meant to be reusable. **正解**: only the widgets the **page entry** mounts go public (with feature-name prefix to avoid cross-feature ambiguity). Widgets composed inside a region stay `_` private inside the region file.
+
+- ✗ Static `const` inside `_FooDelegate` (private class) accessed by the State class via `_FooDelegate._kHorizPad` — works in one file, breaks across files (private member). Either promote class to public AND const to public, OR lift the const to file-level top of the new widget file. **正解**: file-level top consts when ≤ 3 cross boundary; promote class statics when many.
+
+- ✗ `sed \b...\b` for BSD sed (macOS default) silently fails — BSD doesn't support `\b` word boundary syntax. The rename pass appears to run, output 0 changes. **正解**: use `perl -i -pe 's/\bFoo\b/Bar/g'` for word-boundary renames on macOS.
+
+- ✗ Forgetting to delete stale imports after extracting widgets. The page no longer references `AppColors`, `AppSpacing`, `Image`, etc. directly — they moved with the widgets. `unused_import` warnings accumulate. **正解**: after each batch extraction, run `flutter analyze <file>`; for each `unused_import` warning, delete that import line. Sed: `sed -i '' "/^import '<unused-path>';$/d"`.
+
+- ✗ Splitting one widget per file (12 widgets → 12 files of 30-60 lines each). Composition tax (more imports, harder to see widget chains) beats the readability win. **正解**: group widgets that compose together (region of screen, "card + its parts"). One file per region, multiple widgets inside, sub-widgets stay private.
+
 ## Phase 3 (Adapt) — post-cleanup
 
 - ✗ Adding `import 'package:flutter_screenutil/...'` to every grafted .dart file as a Phase 3 prep step, then forgetting to remove it from files that turned out not to need it (after self-rolled scaling code was stripped). Symptom: `unused_import` warnings, host's `very_good_analysis` (or similar lint) treats as actionable. **Final pass**: `grep -L "\.\\(sp\\|w\\|h\\|r\\)\\b" lib/features/<src-name>/**/*.dart | xargs -I {} sed -i '' "/^import 'package:flutter_screenutil\\/.*';$/d" {}` — removes the import from files that don't reference any scaling getter.
