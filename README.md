@@ -1,5 +1,7 @@
 # flutter-merge-into-host
 
+English | [中文](./README.zh-CN.md)
+
 A Claude Code skill that merges another standalone Flutter project's UI code into the current host Flutter project as a self-contained feature subtree.
 
 ## What it does
