@@ -189,17 +189,27 @@ If source used go_router APIs that changed in the host's version (e.g. v17 → v
 
 Fix any breakage per analyze errors. If APIs diverge irreconcilably, ask user whether to bump host go_router or fork the source code.
 
-## Optional follow-up: PageView linkage with tab/chip rows
+## Rule 6: Category-list pattern → PageView linkage (auto-detect + transform)
 
-After merge is functionally complete, the user often asks for a small UX upgrade that the source didn't ship: **"swipe left/right between content lists, and have the selected tab/chip auto-scroll into view"**. Common shape:
+**When this rule fires**: Phase 0 item `i` produced a non-empty "Category-list pattern candidates" list — pages that have a tab/chip row + a single content list but NOT yet a PageView/TabBarView. These pages ship a stale UX (tap a tab to filter, no swipe between lists) that the host's CLAUDE.md (if it exists) typically expects to be upgraded. **Auto mode runs this transform mandatorily** for every Phase 0 candidate; safe mode surfaces a checkpoint per candidate.
 
-- Source category page has a top tab row (already shrink/pin via SliverPersistentHeader) and a single content grid below
-- User wants the content grid to become a horizontal PageView so swiping switches between filtered lists
-- Wants the corresponding tab/chip on top to: (a) reflect the active page (b) auto-scroll into view if outside the visible window
+**Why this is not optional**: a "category + single list" page produces the wrong runtime expectation when shown next to other pages in the host that already use PageView linkage. Users habitually swipe; the unmigrated page feels broken. The grafted code being "functionally complete" but UX-inconsistent is a real silent failure — analyzer can't catch it, only manual smoke-test will, and only if the reviewer happens to swipe that exact page.
 
-**Identify the correct linkage target first**. A category page often has **two tab rows**: a top-level SwitchTab (`category` axis) and a secondary filter chip row (`filter` axis). Ask the user which one drives the PageView before coding — they're not interchangeable. The closer-to-the-list row is the conventional choice (the filter chip), but confirm.
+### Step 1: Identify the linkage target row
 
-### Implementation pattern
+A category page typically has one OR two tab rows:
+
+| Source layout | Linkage target |
+|---|---|
+| Single top-level SwitchTab/TabBar row + content list | that row drives PageView |
+| Two rows: top SwitchTab (broad category) + secondary chip row (filter) + content list | the **row closest to the list** drives PageView (filter chip in this example) |
+| Two rows where both rows together filter the list | drive PageView from chip row; top row stays as broad navigation (Phase 1 should have asked user, but if auto mode picked default, this is it) |
+
+Detect by reading the source file's widget tree: the `tabIndex` / `filterIndex` (or equivalents) that's used to compute the list's data subset is the linkage target. If two indices both filter the list, the one whose row sits visually closer to the list (smaller y-offset gap) wins by convention.
+
+Confirm via Phase 1 plan.md if it recorded a user answer; otherwise apply default and emit a note in the verify report.
+
+### Step 2: Implementation pattern
 
 The outer scroll has to stay a `NestedScrollView` (so the existing pinned SliverPersistentHeader's shrink animation keeps working with inner-page scroll); body becomes a `PageView`; each page is its own `CustomScrollView`.
 
@@ -233,7 +243,7 @@ NestedScrollView(
 )
 ```
 
-### Bidirectional sync without re-entrant `setState`
+### Step 3: Bidirectional sync without re-entrant `setState`
 
 ```dart
 bool _isAnimatingPage = false;  // guard
@@ -255,7 +265,7 @@ void _onPageChanged(int i) {
 }
 ```
 
-### Auto-scroll-into-view for variable-width chips
+### Step 4: Auto-scroll-into-view for variable-width chips
 
 Tab rows with **fixed-width** slots can use offset math (`i * slotWidth + gap` → `animateTo`). Chip rows with **text-length-dependent widths** ("全部" vs "孝顺的宠物") cannot — `Scrollable.ensureVisible` reads the chip's actual `RenderBox` and computes a correct centering offset:
 
@@ -277,10 +287,37 @@ void _scrollFilterIntoView(int i) {
 
 `alignment: 0.5` centers the chip; `0.0` snaps to leading edge (good for "always show next chip preview"); `1.0` snaps to trailing edge.
 
+### Step 5: Verification (added to Phase 4 scorecard)
+
+Each transformed page must satisfy:
+
+```bash
+# Linkage target row was wired
+grep -E "_pageController\.animateToPage" lib/features/<src-name>/<sub>/pages/<file>.dart
+# PageView present
+grep -E "PageView\.builder|PageView\(" lib/features/<src-name>/<sub>/pages/<file>.dart
+# Per-page state preserved
+grep -E "PageStorageKey" lib/features/<src-name>/<sub>/pages/<file>.dart
+# Variable-width chip uses ensureVisible (not offset math)
+grep -E "Scrollable\.ensureVisible" lib/features/<src-name>/<sub>/pages/<file>.dart
+# Re-entrancy guard
+grep -E "_isAnimatingPage|isAnimating" lib/features/<src-name>/<sub>/pages/<file>.dart
+```
+
+All five must hit at least once. Auto mode aborts that page's transform and adds it to verify-report "manual follow-up" if any check fails.
+
 ### Trade-offs vs alternatives
 
 - `TabController` + `TabBarView`: simpler but doesn't compose well with custom pinned/shrinking SliverPersistentHeader animations. PageView gives more control.
 - `ExtendedNestedScrollView` (pub package): adds proper outer-header / inner-PageView linkage for shrink animations. Adds a dep. Default to stock NestedScrollView until proven necessary.
+
+### Skip conditions (do NOT apply Rule 6 even when Phase 0 detected the pattern)
+
+- The list is short enough to fit one screen (no scroll). PageView between short lists is a UX downgrade — less discovery, no swipe affordance to user.
+- The "filter" is single-toggle on/off (e.g. "show only favorites"). Use a switch widget, not multi-page PageView.
+- The page is a settings / form / detail with one section per tab. Tabs are organizational, not data-axis; users don't expect swipe-to-switch-section.
+
+If skipped, record reason in verify-report under "Rule 6 skipped pages".
 
 ## Final pass: flutter analyze 0 error
 

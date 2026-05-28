@@ -80,7 +80,25 @@ Versions that diverge from source:
 | Toast replacement | no (if source has toast) | `AppToast.show(...)` calls |
 | Host theme integration | yes (conservative skip) | source's color literals |
 | go_router API compat | no (if version diverges) | `state.*` usages |
+| Rule 6: category-list → PageView linkage | no (if Phase 0 detected candidates) | see "PageView linkage targets" section below |
 {{ADAPTER_RULES_EXTRA}}
+
+## PageView linkage targets (Rule 6)
+
+Phase 0 item `i` produced this candidate list. For each, identify which tab/chip row drives the PageView.
+
+| Candidate page | Tab rows detected | Driving row (linkage target) | Auto applies? | Skip reason |
+|---|---|---|---|---|
+{{PAGEVIEW_LINKAGE_TABLE}}
+
+Driving-row selection rule when 2 rows are present: closer-to-the-list row wins. When ambiguous (both rows equidistant or both filter the same list), Phase 1 surfaces a 4th `AskUserQuestion` (safe mode) or picks closer-to-list default (auto mode).
+
+Skip reasons that opt a candidate out of Rule 6:
+- List is one-screen short (PageView between short lists is UX downgrade)
+- Filter is binary toggle (use Switch, not PageView)
+- Tabs are sectional (form/settings), not data-axis
+
+Each row marked "Skip" must include a reason — empty skip cells abort the plan generation.
 
 ## Risks
 

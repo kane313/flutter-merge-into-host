@@ -48,6 +48,19 @@ Build a structured inventory of the source Flutter project + a conflict matrix a
    grep -rnE "scaleX\s*=|scaleY\s*=" SOURCE/lib --include="*.dart"
    grep -rnE "\* scaleX|\* scaleY" SOURCE/lib --include="*.dart"
    grep -rnE "MediaQuery\.(sizeOf|of\(context\)\.size).+/\s*\d+" SOURCE/lib --include="*.dart"
+
+   # i. Category-list pattern detection (Phase 3 may upgrade to PageView linkage)
+   # Find pages that have a tab/chip row + a single content list, but NOT yet PageView/TabBarView.
+   # Signal A: page contains SwitchTab / TabBar / chip row widget
+   grep -rlE "SwitchTab|TabBar\(|SliverPersistentHeader|filterIndex|tabIndex|_filterChip|FilterChip" \
+     SOURCE/lib/features --include="*.dart" 2>/dev/null > /tmp/has-tabs
+   # Signal B: page contains a single SliverList/SliverGrid/SliverMasonryGrid/GridView/ListView
+   grep -rlE "SliverGrid|SliverList|SliverMasonryGrid|GridView\.|ListView\." \
+     SOURCE/lib/features --include="*.dart" 2>/dev/null > /tmp/has-list
+   # Signal C: page already has PageView / TabBarView (no upgrade needed)
+   grep -rlE "PageView|TabBarView" SOURCE/lib/features --include="*.dart" 2>/dev/null > /tmp/has-pageview
+   # Candidate = (has-tabs ∩ has-list) − has-pageview
+   comm -12 <(sort /tmp/has-tabs) <(sort /tmp/has-list) | comm -23 - <(sort /tmp/has-pageview)
    ```
 
 4. **Collision detection against host** (5 categories)
@@ -116,3 +129,14 @@ See `templates/discovery.md.tmpl`. Key sections the user reviews:
 - **Asset namespace rewrite preview** — show which `assets/images/<dir>/` will move to `assets/images/<src-name>/<dir>/`
 - **Deps merge plan** — table: source dep | source version | host version | action (add / version-bump / drop)
 - **Self-rolled scaling inventory** — list of sites using `scaleX = size.width / N` patterns; Phase 3 must replace with `.w/.h/.sp/.r`. If `N` matches host's screenutil baseline, the rewrite is mechanical (`X * scaleX` → `X.w`). If `N` differs (e.g. source designed for 375 but host baseline is 402), record the visual-fidelity trade-off.
+- **Category-list pattern candidates** — list of files matching item `i` (has tab/chip row + has single content list + NOT already PageView/TabBarView). For each candidate, Phase 3 Rule 6 will upgrade it to PageView-linkage. Include in discovery.md a per-page mini-report:
+
+  ```
+  - lib/features/<sub>/<file>.dart
+    - tab-row signal: <which grep hit>
+    - list signal: <SliverMasonryGrid / GridView / ...>
+    - tab rows detected: <1 or 2>  (if 2, Phase 1 must ask which one drives PageView)
+    - candidate linkage target: <closest-to-list row's name>
+  ```
+
+  Use this report in Phase 1 to surface a 4th `AskUserQuestion` decision ("which tab row drives PageView") when 2 rows are detected; if only 1, decision is mechanical and auto mode applies it.
