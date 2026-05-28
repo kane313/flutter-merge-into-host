@@ -89,6 +89,18 @@ AI scans this at the start of every phase to avoid repeating known mistakes.
 
 - ✗ Missing structural conflict warnings. Source's `HomePage` self-Scaffolds with its own `BottomNavigationBar`; if host wraps it in another `Scaffold + bottomNavigationBar`, two nav bars stack visually. Compile is clean. Phase 4 must grep this pattern and warn in the report.
 
+## Phase 3 (Adapt) — PageView linkage for tabbed content
+
+- ✗ Implementing "tab + content list" linkage by computing the tap's slot offset from the chip count: `targetOffset = i * (slotWidth + tabGap)`. Works only when chips are **fixed-width** (top-level SwitchTab pattern). Filter chip rows with **text-length-dependent widths** (`'全部'` is 4px wide, `'孝顺的宠物'` is 5×) produce wrong centering. **正解**: tag every chip with a `GlobalKey` and call `Scrollable.ensureVisible(key.currentContext!, alignment: 0.5, duration: ..., curve: ...)`. Reads the real RenderBox after layout and centers exactly.
+
+- ✗ Calling `Scrollable.ensureVisible` synchronously inside `_onFilterSelected` or `_onPageChanged`. The `GlobalKey.currentContext` may be `null` at that point because the chip's RenderBox isn't laid out yet (especially right after a `setState` that changes the active index). **Always wrap in `WidgetsBinding.instance.addPostFrameCallback`** so the call fires after the frame's layout phase finishes.
+
+- ✗ Wiring PageView's `onPageChanged` to `setState(_filterIndex = i)` without a re-entrancy guard. Tap on a chip triggers: `setState` → `animateToPage` → page settles → fires `onPageChanged` → another `setState`. The double setState rebuilds the chip row twice and can cause a visible flicker on slower devices. **正解**: a `bool _isAnimatingPage` flag set true before `animateToPage`, cleared in `.whenComplete`; `onPageChanged` early-returns when the flag is true.
+
+- ✗ Forgetting `PageStorageKey<int>(pageIndex)` on each inner `CustomScrollView` in the PageView body. Swiping right then back left will scroll the previous page back to top (the inner scroll state isn't preserved). PageStorageKey gives each page its own slot in the storage tree.
+
+- ✗ Picking the wrong tab row when there are two. Pages with a top SwitchTab AND a secondary filter chip row will look ambiguous — "下面的分类" could mean either. The chip row closest to the content list is the conventional linkage target, but ask the user before wiring. Re-wiring later is cheap; first-time mis-wire wastes a round-trip.
+
 ## Phase 3 (Adapt) — post-cleanup
 
 - ✗ Adding `import 'package:flutter_screenutil/...'` to every grafted .dart file as a Phase 3 prep step, then forgetting to remove it from files that turned out not to need it (after self-rolled scaling code was stripped). Symptom: `unused_import` warnings, host's `very_good_analysis` (or similar lint) treats as actionable. **Final pass**: `grep -L "\.\\(sp\\|w\\|h\\|r\\)\\b" lib/features/<src-name>/**/*.dart | xargs -I {} sed -i '' "/^import 'package:flutter_screenutil\\/.*';$/d" {}` — removes the import from files that don't reference any scaling getter.

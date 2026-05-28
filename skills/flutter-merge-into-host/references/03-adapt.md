@@ -189,6 +189,99 @@ If source used go_router APIs that changed in the host's version (e.g. v17 → v
 
 Fix any breakage per analyze errors. If APIs diverge irreconcilably, ask user whether to bump host go_router or fork the source code.
 
+## Optional follow-up: PageView linkage with tab/chip rows
+
+After merge is functionally complete, the user often asks for a small UX upgrade that the source didn't ship: **"swipe left/right between content lists, and have the selected tab/chip auto-scroll into view"**. Common shape:
+
+- Source category page has a top tab row (already shrink/pin via SliverPersistentHeader) and a single content grid below
+- User wants the content grid to become a horizontal PageView so swiping switches between filtered lists
+- Wants the corresponding tab/chip on top to: (a) reflect the active page (b) auto-scroll into view if outside the visible window
+
+**Identify the correct linkage target first**. A category page often has **two tab rows**: a top-level SwitchTab (`category` axis) and a secondary filter chip row (`filter` axis). Ask the user which one drives the PageView before coding — they're not interchangeable. The closer-to-the-list row is the conventional choice (the filter chip), but confirm.
+
+### Implementation pattern
+
+The outer scroll has to stay a `NestedScrollView` (so the existing pinned SliverPersistentHeader's shrink animation keeps working with inner-page scroll); body becomes a `PageView`; each page is its own `CustomScrollView`.
+
+```dart
+NestedScrollView(
+  headerSliverBuilder: (context, _) => [
+    SliverOverlapAbsorber(
+      handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+      sliver: SliverPersistentHeader(pinned: true, delegate: existingDelegate),
+    ),
+  ],
+  body: PageView.builder(
+    controller: _pageController,
+    onPageChanged: _onPageChanged,  // sets selectedIndex + scrolls chip into view
+    itemCount: filterCount,
+    itemBuilder: (context, pageIndex) => Builder(
+      builder: (context) => CustomScrollView(
+        key: PageStorageKey<int>(pageIndex),  // preserves per-page scroll position
+        slivers: [
+          SliverOverlapInjector(
+            handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+          ),
+          SliverPadding(
+            padding: ...,
+            sliver: SliverMasonryGrid(...), // or any inner sliver
+          ),
+        ],
+      ),
+    ),
+  ),
+)
+```
+
+### Bidirectional sync without re-entrant `setState`
+
+```dart
+bool _isAnimatingPage = false;  // guard
+
+void _onFilterSelected(int i) {
+  if (_filterIndex == i) return;
+  _isAnimatingPage = true;
+  setState(() => _filterIndex = i);
+  _scrollFilterIntoView(i);
+  _pageController.animateToPage(i,
+    duration: Duration(milliseconds: 300), curve: Curves.easeInOut,
+  ).whenComplete(() => _isAnimatingPage = false);
+}
+
+void _onPageChanged(int i) {
+  if (_isAnimatingPage) return;  // skip when triggered by tap, animateToPage handled it
+  setState(() => _filterIndex = i);
+  _scrollFilterIntoView(i);
+}
+```
+
+### Auto-scroll-into-view for variable-width chips
+
+Tab rows with **fixed-width** slots can use offset math (`i * slotWidth + gap` → `animateTo`). Chip rows with **text-length-dependent widths** ("全部" vs "孝顺的宠物") cannot — `Scrollable.ensureVisible` reads the chip's actual `RenderBox` and computes a correct centering offset:
+
+```dart
+late final List<GlobalKey> _chipKeys =
+    List.generate(filters.length, (_) => GlobalKey());
+
+void _scrollFilterIntoView(int i) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final ctx = _chipKeys[i].currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(ctx,
+      alignment: 0.5,  // 0=left edge, 0.5=center, 1=right edge
+      duration: Duration(milliseconds: 300), curve: Curves.easeInOut,
+    );
+  });
+}
+```
+
+`alignment: 0.5` centers the chip; `0.0` snaps to leading edge (good for "always show next chip preview"); `1.0` snaps to trailing edge.
+
+### Trade-offs vs alternatives
+
+- `TabController` + `TabBarView`: simpler but doesn't compose well with custom pinned/shrinking SliverPersistentHeader animations. PageView gives more control.
+- `ExtendedNestedScrollView` (pub package): adds proper outer-header / inner-PageView linkage for shrink animations. Adds a dep. Default to stock NestedScrollView until proven necessary.
+
 ## Final pass: flutter analyze 0 error
 
 After all rule applications:
