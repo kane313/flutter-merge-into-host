@@ -42,6 +42,12 @@ Build a structured inventory of the source Flutter project + a conflict matrix a
 
    # g. Hardcoded route literals (need /-prefix rewrite later)
    grep -rnE "context\.(go|push|pushReplacement)\s*\(\s*'/" SOURCE/lib --include="*.dart"
+
+   # h. Self-rolled width-ratio scaling (must be removed in Phase 3 — collides with host's screenutil)
+   grep -rnE "_kDesignWidth|kDesignWidth|DesignWidth" SOURCE/lib --include="*.dart"
+   grep -rnE "scaleX\s*=|scaleY\s*=" SOURCE/lib --include="*.dart"
+   grep -rnE "\* scaleX|\* scaleY" SOURCE/lib --include="*.dart"
+   grep -rnE "MediaQuery\.(sizeOf|of\(context\)\.size).+/\s*\d+" SOURCE/lib --include="*.dart"
    ```
 
 4. **Collision detection against host** (5 categories)
@@ -109,3 +115,4 @@ See `templates/discovery.md.tmpl`. Key sections the user reviews:
 - **Route prefix rewrite preview** — show the 5-10 `context.go('/X')` calls that will be prefixed
 - **Asset namespace rewrite preview** — show which `assets/images/<dir>/` will move to `assets/images/<src-name>/<dir>/`
 - **Deps merge plan** — table: source dep | source version | host version | action (add / version-bump / drop)
+- **Self-rolled scaling inventory** — list of sites using `scaleX = size.width / N` patterns; Phase 3 must replace with `.w/.h/.sp/.r`. If `N` matches host's screenutil baseline, the rewrite is mechanical (`X * scaleX` → `X.w`). If `N` differs (e.g. source designed for 375 but host baseline is 402), record the visual-fidelity trade-off.

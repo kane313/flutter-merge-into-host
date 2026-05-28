@@ -50,6 +50,12 @@ AI scans this at the start of every phase to avoid repeating known mistakes.
 
 ## Phase 3 (Adapt) — screenutil
 
+- ✗ **Leaving source's self-rolled width-ratio scaling in place after introducing screenutil**. Source likely has `_kDesignWidth = 402; final scaleX = size.width / _kDesignWidth;` and uses `X * scaleX` everywhere. If you only add `.w/.h` to other dimensions without removing this, you get **double-scaling**: `97.w * scaleX` divides by host's designSize once (via `.w`) AND again (via `scaleX`). Symptom is invisible on the baseline device (`scaleX = 1`) but visible everywhere else — content shrinks on smaller screens, grows on larger. **Phase 3 Step E removes ALL `_kDesignWidth` const + `scaleX/scaleY` variables + `* scaleX/* scaleY` arithmetic**; pure `.w/.h/.r` instead. Grep `scaleX\s*=` to verify zero residual.
+
+- ✗ Mass-sed `height: N` → `height: N.h` blindly. **`TextStyle.height` is a line-height multiplier (unitless, e.g. 1.2 = 120% of fontSize), not a pixel value.** Scaling it by `.h` makes line-height device-dependent in a way no designer ever intended. Phase 3 Step F greps `TextStyle(... height: N.h ...)` and reverts those specific sites.
+
+- ✗ Stripping `Builder(builder: (context) { final scaleX = ...; return Row(...); })` wrappers without rebalancing closing parens. The Builder's `return X;` body becomes the direct child — leaving the `);` `},` `)` trailing parens that paired with Builder/lambda creates "Expected to find ';'" / "Unexpected token" cascades. Always count parens after removing a Builder wrapper; or use Read+Edit on the exact region instead of regex sed.
+
 - ✗ Running `sed 'fontSize: N' → 'fontSize: N.sp'` before stripping `const` from outer widgets. `.sp` is an instance getter; `const TextStyle(fontSize: 14.sp)` produces `const_eval_extension_method` error. **Order: strip const first, then add suffixes.**
 
 - ✗ Stripping `const [` from constructor default params: `this.items = [...]` was `this.items = const [...]`. After strip, compiles only if all `[...]` contents are themselves const. **Restore `const`**: `this.items = const ['图片']`.
@@ -82,6 +88,10 @@ AI scans this at the start of every phase to avoid repeating known mistakes.
 - ✗ Telling user "hot reload" when they need "hot restart". The asset manifest reloads only on **R** (capital), not r. Include the gotcha in every verify report's smoke-test checklist line 1.
 
 - ✗ Missing structural conflict warnings. Source's `HomePage` self-Scaffolds with its own `BottomNavigationBar`; if host wraps it in another `Scaffold + bottomNavigationBar`, two nav bars stack visually. Compile is clean. Phase 4 must grep this pattern and warn in the report.
+
+## Phase 3 (Adapt) — post-cleanup
+
+- ✗ Adding `import 'package:flutter_screenutil/...'` to every grafted .dart file as a Phase 3 prep step, then forgetting to remove it from files that turned out not to need it (after self-rolled scaling code was stripped). Symptom: `unused_import` warnings, host's `very_good_analysis` (or similar lint) treats as actionable. **Final pass**: `grep -L "\.\\(sp\\|w\\|h\\|r\\)\\b" lib/features/<src-name>/**/*.dart | xargs -I {} sed -i '' "/^import 'package:flutter_screenutil\\/.*';$/d" {}` — removes the import from files that don't reference any scaling getter.
 
 ## Shell scripting
 

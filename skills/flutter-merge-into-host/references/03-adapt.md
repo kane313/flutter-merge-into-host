@@ -90,6 +90,44 @@ If source has design tokens like `AppSpacing.lg = 16` and host CLAUDE.md mandate
 
 Default for auto mode: **keep const tokens**. This is the trade-off seen in real run (cute_animal merge); the 7% drift is invisible on spacing. Heavy-mode users wanting strict compliance can switch later by manually de-const-ing affected sites.
 
+### Step E: Remove self-rolled width-ratio scaling
+
+Phase 0 collected (item `h`) all sites with `_kDesignWidth = N` / `scaleX = size.width / N` / `X * scaleX` patterns. These are the source's own attempt at responsive sizing and **directly collide with host's screenutil**:
+
+- `97.w * scaleX` is **double-scaled**: `.w` already divides by host's `designSize.width`; multiplying again by `scaleX = device.width / 402` divides a second time. On the baseline device (402), `scaleX = 1` so the bug is invisible during dev; on any other device, content shrinks/grows wrong.
+
+**Mechanical replacement** (when source's designWidth equals host's screenutil baseline, the common case):
+
+| Source pattern | Replacement |
+|---|---|
+| `final scaleX = size.width / 402;` (or `_kDesignWidth`) | delete the line |
+| `final scaleY = size.height / 874;` | delete the line |
+| `X * scaleX` for a horizontal dimension | `X.w` |
+| `X * scaleX` for an icon/square dimension | `X.r` (preferred — handles narrow/tall device variance better than `.w`) |
+| `Y * scaleY` for a vertical dimension | `Y.h` |
+| `AppSpacing.xl * scaleX` | `AppSpacing.xl.w` |
+| const `_kDesignWidth = 402` / `_kDesignHeight = 874` declarations | delete |
+| `Builder(builder: (context) { final scaleX = MediaQuery.sizeOf(context).width / 402; return ...; })` | strip the Builder wrapper; use `.w/.h/.r` directly inside the inner widget |
+
+After all replacements, `grep -rn "scaleX\\s*=\\|scaleY\\s*=\\|\\* scaleX\\|\\* scaleY\\|_kDesignWidth\\|kDesignWidth"` in the grafted code must output empty.
+
+**Preserve these MediaQuery usages** (not scaling, real-pixel needs):
+- `CustomPainter` paints the actual device canvas — needs `MediaQuery.sizeOf(context).width` directly, not `.w`
+- Animations like `Offset(-screenW * 1.2 * (1 - t), 0)` (card slides in from off-screen) — needs real device width
+- Layouts like `width: screenW - AppSpacing.xl * 2` (fill viewport minus padding) — needs real device width
+
+The distinguishing question: "Is this number measuring something physical about the device (canvas size, slide-from-edge distance, viewport-minus-padding), or trying to be design-relative (an icon designed at 34px, a card designed at 280px)?" Physical → keep MediaQuery; design-relative → use `.w/.h/.sp/.r`.
+
+### Step F: Watch for `height: N.h` in TextStyle (semantic bug)
+
+`TextStyle.height` is a **line-height multiplier** (unitless, e.g. `height: 1.2` means line is 120% of fontSize). The mass-sed `height: N` → `height: N.h` rule wrongly scales this. Catch by:
+
+```bash
+grep -rnE "TextStyle\([^)]*height:\s*\d+(\.\d+)?\.h" lib/features/<src-name>/ --include="*.dart"
+```
+
+Any hit → revert that specific `.h` (e.g. `height: 1.h` → `height: 1`). The sed in Step B should ideally pattern-match `height:` only inside `SizedBox` / `Container` / `Positioned`, not inside `TextStyle`, but Bash regex can't do that AST-level disambiguation cheaply. Manual revert pass after Step B.
+
 ## Rule 2: DebounceUtil on tappables
 
 Locate the source's base button widgets (typically `app_button.dart`, `app_circle_icon_button.dart`, or whatever wraps the main `onPressed`/`onTap` API). Wrap in **state-level cache** to avoid rebuilding the debounced closure each `build`:
