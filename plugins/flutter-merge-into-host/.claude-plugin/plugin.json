@@ -1,0 +1,17 @@
+{
+  "name": "flutter-merge-into-host",
+  "description": "Merges another standalone Flutter project's UI (lib/ + assets/ + pubspec deps) into the current host Flutter project as a self-contained feature subtree. 5-phase pipeline (discover / decide / graft / adapt / verify) with 9 adapt rules covering screenutil suffixes, DebounceUtil wrapping, ToastUtil replacement, host theme integration, go_router compat, category-list PageView linkage, splash widget injection, widget file split, and base button label overflow guard.",
+  "version": "0.1.0",
+  "author": {
+    "name": "shenjinhua"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "flutter",
+    "merge",
+    "migration",
+    "graft",
+    "host-integration",
+    "skills"
+  ]
+}

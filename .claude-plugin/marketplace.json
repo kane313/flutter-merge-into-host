@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "flutter-merge-skills",
+  "description": "Skills for merging another standalone Flutter project's UI code into the current host Flutter project as a self-contained feature subtree.",
+  "owner": {
+    "name": "shenjinhua"
+  },
+  "plugins": [
+    {
+      "name": "flutter-merge-into-host",
+      "description": "Merges another standalone Flutter project's UI (lib/ + assets/ + pubspec deps) into the current host Flutter project. 5-phase pipeline: discover → decide → graft → adapt → verify. Triggers on Chinese phrases 迁移/flutter迁移/复制/合并 or English merge/migrate/graft (with or without a source path). Supports safe and auto modes.",
+      "category": "development",
+      "source": "./plugins/flutter-merge-into-host"
+    }
+  ]
+}
