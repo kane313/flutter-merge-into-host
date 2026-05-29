@@ -50,17 +50,35 @@ Build a structured inventory of the source Flutter project + a conflict matrix a
    grep -rnE "MediaQuery\.(sizeOf|of\(context\)\.size).+/\s*\d+" SOURCE/lib --include="*.dart"
 
    # i. Category-list pattern detection (Phase 3 may upgrade to PageView linkage)
+   # ⚠️ DETECTION IS WIDGET-TREE BASED, NOT FILENAME-BASED. A file called `xxx_page.dart` /
+   # `feed_page.dart` / `discover.dart` with the same widget combo is just as much a candidate
+   # as one called `category_page.dart`. Conversely, a file called `category_page.dart` that
+   # has no list widget (e.g. it's just a category-grid icon picker) is NOT a candidate.
+   # The rule fires on the combination of (tab/chip row widget) + (main content list widget),
+   # nothing else. Never let filename bias the call.
+   #
    # Find pages that have a tab/chip row + a single content list, but NOT yet PageView/TabBarView.
    # Signal A: page contains SwitchTab / TabBar / chip row widget
-   grep -rlE "SwitchTab|TabBar\(|SliverPersistentHeader|filterIndex|tabIndex|_filterChip|FilterChip" \
+   grep -rlE "SwitchTab|TabBar\(|SliverPersistentHeader|filterIndex|tabIndex|_filterChip|FilterChip|ChoiceChip|ToggleButtons|SegmentedButton" \
      SOURCE/lib/features --include="*.dart" 2>/dev/null > /tmp/has-tabs
    # Signal B: page contains a single SliverList/SliverGrid/SliverMasonryGrid/GridView/ListView
    grep -rlE "SliverGrid|SliverList|SliverMasonryGrid|GridView\.|ListView\." \
      SOURCE/lib/features --include="*.dart" 2>/dev/null > /tmp/has-list
    # Signal C: page already has PageView / TabBarView (no upgrade needed)
-   grep -rlE "PageView|TabBarView" SOURCE/lib/features --include="*.dart" 2>/dev/null > /tmp/has-pageview
+   grep -rlE "PageView\(|PageView\.builder|TabBarView" SOURCE/lib/features --include="*.dart" 2>/dev/null > /tmp/has-pageview
    # Candidate = (has-tabs ∩ has-list) − has-pageview
    comm -12 <(sort /tmp/has-tabs) <(sort /tmp/has-list) | comm -23 - <(sort /tmp/has-pageview)
+   # Edge-case verification before declaring a candidate (avoid false positives):
+   #   - If a file matches has-tabs only because of a generic chip widget USED FOR NAVIGATION
+   #     (chip tap → context.push another route) instead of in-page filtering → NOT a candidate.
+   #   - If a file matches has-list only because of an embedded sub-list (e.g. SliverList INSIDE
+   #     a Card whose parent has no chip/tab row) → NOT a candidate.
+   #   - If the "list" is a custom card-stack / banner-carousel widget (e.g. HomeCardStack /
+   #     HomeBannerCarousel) that doesn't grep-hit on SliverList/GridView/ListView → NOT a
+   #     candidate even when chip row exists.
+   # Confirm each candidate by opening the file and verifying: (a) main body of the page is a
+   # scrollable list, (b) the chip/tab row state actually drives — or is supposed to drive,
+   # post-API — the visible content of that list.
 
    # j. Splash (开屏) page detection — Phase 3 may replace with host's central splash module
    # Source-side: dir name / file name / router initialLocation
