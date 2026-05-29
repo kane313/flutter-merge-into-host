@@ -6,8 +6,8 @@ Quick reference for the exact behavior differences. Detailed phase steps are in 
 
 | Mode | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 |
 |---|---|---|---|---|---|
-| `safe` (default) | CHECKPOINT | CHECKPOINT (3 AskUserQuestion) | advance | advance | CHECKPOINT |
-| `auto` | log + advance | log + apply defaults | advance | advance | log + advance |
+| `auto` (default) | log + advance | log + apply defaults | advance | advance | log + advance |
+| `safe` (opt-in) | CHECKPOINT | CHECKPOINT (3 AskUserQuestion) | advance | advance | CHECKPOINT |
 
 In `auto` mode, every step in `0N-*.md` that says "wait for user reply / CHECKPOINT pause / approval" is replaced by:
 
@@ -46,13 +46,15 @@ Auto mode runs all six. Skipping any produces silent-at-compile-time, broken-at-
 
 If the user interrupts an auto-mode run with phrases suggesting they want to review (`等等` / `wait` / `pause` / `让我看看` / `暂停` / `slow down`), downgrade to `safe` mode for remaining phases. Emit the next CHECKPOINT as if it had been safe all along (include all the state context the user would have seen at that phase boundary).
 
-## Auto-mode trigger phrases
+## Mode selection
 
-Refer to SKILL.md § "Auto-mode trigger detection". Phrases include:
-- Chinese: `不再询问` / `不用问` / `连续执行` / `自动执行` / `一口气` / `跑完为止` / `直接执行`
-- English: `continue without asking` / `no checkpoint` / `autopilot` / `auto mode` / `yolo` / `just do it`
+`auto` is the **default** — no trigger phrase needed. The run is auto unless the user opts into safe mode.
 
-Substring match, case-insensitive. Any match → auto mode for the whole run.
+**Safe-mode trigger phrases** (refer to SKILL.md § "Mode default & safe-mode trigger detection"):
+- Chinese: `逐步` / `一步步` / `逐步确认` / `每步确认` / `分步` / `让我确认` / `让我看看每一步` / `安全模式` / `safe 模式`
+- English: `step by step` / `let me review each` / `safe mode` / `checkpoint each` / `pause at each` / `confirm each step` / `one step at a time`
+
+Substring match, case-insensitive. Any match → safe mode for the whole run. No match → auto (default).
 
 ## What auto mode is NOT
 
@@ -60,4 +62,4 @@ Substring match, case-insensitive. Any match → auto mode for the whole run.
 - ❌ A "shortcut" mode. Pre-flight checks remain mandatory.
 - ❌ A "non-destructive" mode. Same file writes happen as in safe.
 
-The ONLY difference is the absence of user-facing pause. Use it when you're confident the source-host pairing is straightforward (small source, no exotic deps, host with clear CLAUDE.md). For unknown pairings, default to safe so you can inspect Phase 0/1 outputs before Phase 2 starts moving files.
+The ONLY difference is the absence of user-facing pause. Auto is the default for all pairings — the mandatory pre-flight checks (above) plus the always-written `discovery.md` / `plan.md` artifacts mean even an unknown pairing is safe to run end-to-end; the user can inspect those artifacts after the fact, or opt into safe mode up front (or interrupt mid-run) when they want to gate Phase 2 on a manual review of Phase 0/1 outputs.

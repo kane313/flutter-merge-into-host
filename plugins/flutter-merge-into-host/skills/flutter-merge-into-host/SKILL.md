@@ -1,6 +1,6 @@
 ---
 name: flutter-merge-into-host
-description: "[Flutter projects only — pubspec.yaml with flutter dep present in the host cwd; source path may be given upfront or asked for after trigger.] Merges another standalone Flutter project's UI code (lib/ + assets/ + pubspec deps) into the current host Flutter project as a self-contained feature subtree. Resolves naming collisions, normalizes deps, rewrites relative imports for the new depth, prefixes all GoRoute paths + literal `context.go/push` strings, namespaces assets, and adapts to the host's CLAUDE.md rules (flutter_screenutil, DebounceUtil, ToastUtil, host theme). Triggers on EITHER (a) message contains a path to another Flutter project AND a verb like 'merge / migrate / copy / 复制 / 迁移 / 合并 / graft / 嫁接 / 接入', OR (b) message contains a standalone phrase '迁移' / 'flutter迁移' / 'Flutter 迁移' / 'flutter migration' / 'flutter project merge' / '合并 Flutter 项目' (even without a path — skill will ask user for the source path as its first step). Two modes: safe (checkpoint after each of 5 phases) / auto (no pauses, sensible defaults). Output structure: `lib/features/<src-name>/<sub-feature>/{pages,widgets,dialogs}/...` with `<src-name>` as the new feature namespace."
+description: "[Flutter projects only — pubspec.yaml with flutter dep present in the host cwd; source path may be given upfront or asked for after trigger.] Merges another standalone Flutter project's UI code (lib/ + assets/ + pubspec deps) into the current host Flutter project as a self-contained feature subtree. Resolves naming collisions, normalizes deps, rewrites relative imports for the new depth, prefixes all GoRoute paths + literal `context.go/push` strings, namespaces assets, and adapts to the host's CLAUDE.md rules (flutter_screenutil, DebounceUtil, ToastUtil, host theme). Triggers on EITHER (a) message contains a path to another Flutter project AND a verb like 'merge / migrate / copy / 复制 / 迁移 / 合并 / graft / 嫁接 / 接入', OR (b) message contains a standalone phrase '迁移' / 'flutter迁移' / 'Flutter 迁移' / 'flutter migration' / 'flutter project merge' / '合并 Flutter 项目' (even without a path — skill will ask user for the source path as its first step). Runs in auto mode by default (no checkpoint pauses, sensible defaults, end-to-end); opt into safe mode (checkpoint after each of 5 phases) with phrases like 'step by step' / '逐步确认' / 'let me review each phase'. Output structure: `lib/features/<src-name>/<sub-feature>/{pages,widgets,dialogs}/...` with `<src-name>` as the new feature namespace."
 ---
 
 # flutter-merge-into-host
@@ -37,16 +37,20 @@ When Pattern B fires WITHOUT a clear source path, the skill's first step is an `
 
 - `source_path` (required) — absolute path to source Flutter project root
 - `feature_name` (optional, default: source pubspec `name`) — top-level feature folder name under `lib/features/<feature_name>/`; auto-derived as snake_case from source project name if omitted
-- `mode` (optional, default: `safe`) — `safe` for checkpoint-per-phase, `auto` for end-to-end no-pause
+- `mode` (optional, default: `auto`) — `auto` for end-to-end no-pause (the default), `safe` for checkpoint-per-phase
 
-## Auto-mode trigger detection
+## Mode default & safe-mode trigger detection
 
-Scan the user's invoking prompt. Upgrade mode to `auto` regardless of explicit `mode=` arg if ANY match:
+**Default is `auto`.** Unless the user opts into safe mode (see below), run all 5 phases end-to-end with sensible defaults and no checkpoint pauses. Announce at the start: "Running in auto mode (default) — end-to-end, no checkpoint pauses. Say 'step by step' / '逐步确认' anytime to switch to safe mode."
 
-**Chinese**: `不再询问` / `不用问` / `连续执行` / `自动执行` / `一口气` / `跑完为止` / `直接执行`
-**English**: `continue without asking` / `no checkpoint` / `autopilot` / `auto mode` / `yolo` / `just do it`
+**Downgrade to `safe` mode** (checkpoint per phase) if the user's invoking prompt contains ANY of:
 
-Announce the elevation: "Auto mode triggered by '<phrase>' — will run end-to-end without checkpoint pauses."
+**Chinese**: `逐步` / `一步步` / `逐步确认` / `每步确认` / `分步` / `让我确认` / `让我看看每一步` / `安全模式` / `safe 模式`
+**English**: `step by step` / `let me review each` / `safe mode` / `checkpoint each` / `pause at each` / `confirm each step` / `one step at a time`
+
+When safe mode is selected, announce: "Safe mode triggered by '<phrase>' — will pause for checkpoint after Phase 0, Phase 1, and Phase 4."
+
+Mid-run, the user can also force safe at any time with `等等` / `wait` / `暂停` / `让我看看` / `slow down` (see `references/fastlane.md` § "Mid-run mode change").
 
 ## The 5-phase pipeline (overview)
 
@@ -62,14 +66,7 @@ Detailed phase orchestration: read `references/0N-<phase>.md` (one file per phas
 
 ## Checkpoint mechanism
 
-**Safe mode** (default):
-
-1. At end of each checkpoint phase, write phase output files to `.flutter-graft/<src-name>/`
-2. Emit a `CHECKPOINT Phase N` block listing approval items
-3. Wait for reply: `continue` / `ok` / `过` / `next` (approve) OR any other content (treat as modification → adjust and re-emit CHECKPOINT)
-4. Only after approval, advance
-
-**Auto mode** (override mandatory rule): every "wait for user" instruction in `references/0N-*.md` is replaced by:
+**Auto mode** (default): every "wait for user" instruction in `references/0N-*.md` is replaced by:
 
 1. Write phase output files normally
 2. Log a one-line `[AUTO] Phase N done: <key decisions taken>` to chat (replaces full CHECKPOINT block)
@@ -77,6 +74,13 @@ Detailed phase orchestration: read `references/0N-<phase>.md` (one file per phas
 4. Advance immediately
 
 After full run, emit ONE final summary listing: phases completed, defaults taken, blockers, files produced. This is informational, not a prompt.
+
+**Safe mode** (only when the user opts in — see § "Mode default & safe-mode trigger detection"):
+
+1. At end of each checkpoint phase, write phase output files to `.flutter-graft/<src-name>/`
+2. Emit a `CHECKPOINT Phase N` block listing approval items
+3. Wait for reply: `continue` / `ok` / `过` / `next` (approve) OR any other content (treat as modification → adjust and re-emit CHECKPOINT)
+4. Only after approval, advance
 
 ### Phase 1 auto defaults (no user pause)
 
@@ -116,7 +120,7 @@ Templates for skill-owned outputs: `templates/discovery.md.tmpl`, `templates/pla
 
 ## Constraints
 
-- **Never skip Phase 0 checkpoint in safe mode** — the discovery file is the contract; downstream phases require it
+- **Never skip Phase 0 checkpoint in safe mode** — the discovery file is the contract; downstream phases require it. (In auto mode, the default, there is no Phase 0 checkpoint pause — but the `discovery.md` file is STILL written; auto skips the user pause, never the artifact.)
 - **Never modify host files outside `lib/main.dart` (route integration), `pubspec.yaml` (deps + assets), and the `lib/features/<src-name>/` + `assets/.../<src-name>/...` namespace** without explicit user acknowledgement
 - **Never rename source classes/widgets to avoid collisions** — always `import as <alias>` instead; renaming makes the source diverge from upstream and breaks future re-syncs
 - **Never blindly downgrade host deps to match source** — if source uses `permission_handler ^11` and host requires `^12`, source code must adapt (or the merge aborts), not host

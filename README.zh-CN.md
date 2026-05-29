@@ -60,12 +60,12 @@
 
 | 模式 | 行为 |
 |---|---|
-| `safe`（默认） | Phase 0、Phase 1（3 个 AskUserQuestion）、Phase 4 后强制 checkpoint 暂停 |
-| `auto` | 端到端跑，用合理默认值；强制 pre-flight 检查仍执行 |
+| `auto`（默认） | 端到端跑，用合理默认值，无 checkpoint 暂停；强制 pre-flight 检查仍执行 |
+| `safe`（手动选用） | Phase 0、Phase 1（3 个 AskUserQuestion）、Phase 4 后强制 checkpoint 暂停 |
 
-`auto` 触发词：`连续执行`、`自动执行`、`不用问`、`一口气`、`跑到底`、`autopilot`、`yolo`、`just do it`。
+**默认就是 `auto`**，无需任何触发词。想逐步确认时用这些词切到 `safe`：`逐步` / `一步步` / `逐步确认` / `每步确认` / `让我确认` / `安全模式` / `step by step` / `safe mode`。
 
-中途打断 auto（`等等` / `wait` / `暂停` / `让我看看`）→ 自动降级为 safe。
+也可以在 auto 跑到一半时用 `等等` / `wait` / `暂停` / `让我看看` 打断 → 剩余阶段降级为 safe。
 
 ## Phase 3 改造规则（Rules）
 
@@ -156,10 +156,25 @@ skills/flutter-merge-into-host/
 
 ## 典型用法示例
 
-### 1. 用户给路径，safe 模式逐步确认
+### 1. 默认 auto 模式，一口气跑完（无需任何触发词）
 
 ```
 用户："把 ../CuteAnimal-main 复制到本项目"
+↓
+默认 auto 模式（无需触发词）
+↓
+全部 5 阶段一气呵成（Phase 0 扫描 / Phase 1 用默认决策 / Phase 2 文件搬 + 路由 prefix + asset 重写 / Phase 3 跑 9 条 Rule / Phase 4 验证）
+discovery.md / plan.md / graft-log.md / verify-report.md 全程照常落盘
+↓
+[REPORT] 最终汇报（0 error + 资源全 OK + 结构警告 + follow-up）
+```
+
+### 2. 想逐步确认 → safe 模式
+
+```
+用户："把 ../CuteAnimal-main 复制到本项目，一步步来让我确认"
+↓
+safe 模式触发（"一步步" / "让我确认" 匹配触发词）
 ↓
 Phase 0 自动扫描 → 写 .flutter-graft/cute_animal/discovery.md
 [CHECKPOINT Phase 0] 用户审阅 → 回 continue
@@ -173,17 +188,7 @@ Phase 2 / 3 自动推进（文件搬 / 路由 prefix / asset 重写 / 9 条 Rule
 用户回 accept → 完成
 ```
 
-### 2. Auto 模式一口气
-
-```
-用户："@../X-flutter 合并到本项目，不用问我了"
-↓
-auto 模式触发（"不用问我了" 匹配触发词）
-↓
-全部 5 阶段一气呵成 + 9 条 Rule + 所有 pre-flight 检查
-↓
-[REPORT] 最终汇报
-```
+> 也可以在 auto 跑到一半时用 `等等` / `暂停` / `让我看看` 打断，剩余阶段降级为 safe。
 
 ## 许可
 

@@ -30,10 +30,10 @@ Given a path to another Flutter project (with its own `lib/`, `assets/`, `pubspe
 
 | Mode | Behavior |
 |---|---|
-| `safe` (default) | Checkpoint pause after Phase 0, Phase 1 (3 AskUserQuestion), Phase 4 |
-| `auto` | End-to-end with sensible defaults; mandatory pre-flight checks still run |
+| `auto` (default) | End-to-end with sensible defaults, no checkpoint pauses; mandatory pre-flight checks still run |
+| `safe` (opt-in) | Checkpoint pause after Phase 0, Phase 1 (3 AskUserQuestion), Phase 4 |
 
-Auto trigger phrases: `连续执行`, `自动执行`, `不用问`, `autopilot`, `yolo`, `just do it`.
+**Auto is the default** — no trigger phrase needed. Opt into safe mode with phrases like `step by step` / `逐步确认` / `let me review each` / `safe mode` / `一步步`. You can also interrupt a running auto merge with `等等` / `wait` / `暂停` to downgrade to safe for the remaining phases.
 
 ## Installation
 
