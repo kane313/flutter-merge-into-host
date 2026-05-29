@@ -94,13 +94,36 @@
 
 ## 安装
 
-放到 Claude Code 的 skills 目录：
+本仓库是一个 Claude Code plugin marketplace，推荐用 `/plugin` 命令安装：
+
+```
+# 1. 把本仓库添加为 marketplace
+/plugin marketplace add kane313/flutter-merge-into-host
+
+# 2. 从中安装插件
+/plugin install flutter-merge-into-host@flutter-merge-skills
+
+# 3. 重载使 skill 注册生效
+/reload-plugins
+```
+
+装好后，`flutter-merge-into-host` skill 会在 merge/迁移 等触发词出现时自动激活（见[什么时候用](#什么时候用)）。可用 `/plugin list` 确认已安装。
+
+- Marketplace 名：`flutter-merge-skills`
+- Plugin 名：`flutter-merge-into-host`
+
+后续更新：`/plugin marketplace update flutter-merge-skills`，再重新跑一遍 `/plugin install flutter-merge-into-host@flutter-merge-skills`。
+
+<details>
+<summary>手动安装（不走 marketplace）</summary>
+
+克隆后把 skill 放到 Claude Code 的 plugins 目录：
 
 ```
 ~/.claude/plugins/<plugin-name>/skills/flutter-merge-into-host/
 ```
 
-或把本仓库作为 Claude Code plugin 源。
+</details>
 
 ## 目录结构
 

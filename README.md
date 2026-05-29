@@ -37,13 +37,36 @@ Auto trigger phrases: `连续执行`, `自动执行`, `不用问`, `autopilot`, 
 
 ## Installation
 
-This skill targets Claude Code's skill system. Place under your skills directory:
+This repo is a Claude Code plugin marketplace. Install via the `/plugin` command (recommended):
+
+```
+# 1. Add this repo as a marketplace
+/plugin marketplace add kane313/flutter-merge-into-host
+
+# 2. Install the plugin from it
+/plugin install flutter-merge-into-host@flutter-merge-skills
+
+# 3. Reload so the skill registers
+/reload-plugins
+```
+
+After that, the `flutter-merge-into-host` skill auto-triggers on merge/迁移 phrases (see [When to use](#when-to-use)). Verify with `/plugin list`.
+
+- Marketplace name: `flutter-merge-skills`
+- Plugin name: `flutter-merge-into-host`
+
+To update later: `/plugin marketplace update flutter-merge-skills` then `/plugin install flutter-merge-into-host@flutter-merge-skills` again.
+
+<details>
+<summary>Manual install (without the marketplace)</summary>
+
+Clone and drop the skill under your Claude Code plugins directory:
 
 ```
 ~/.claude/plugins/<plugin-name>/skills/flutter-merge-into-host/
 ```
 
-Or use this repo as a Claude Code plugin source.
+</details>
 
 ## Layout
 
